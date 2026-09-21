@@ -418,6 +418,10 @@ static void write_json_window(FILE *f, uint32_t win_lo_page,
                               const uint8_t *ram_base,
                               uint32_t ram_size)
 {
+#ifdef __vita__
+    /* Vita does not build the execution histogram; see the emission below. */
+    (void)exec_pc_counts;
+#endif
     uint32_t page_sz = 4096u;
     uint32_t page, run_start;
     int      in_run;
@@ -515,6 +519,10 @@ static void write_json_window(FILE *f, uint32_t win_lo_page,
             fprintf(f, "],\n");
 
             fprintf(f, "    \"executed_pc_counts\": {");
+#ifdef __vita__
+            /* Vita does not build the per-word execution histogram; emit the
+             * empty object so the JSON stays well-formed. */
+#else
             int emitted_count = 0;
             for (uint32_t ep = phys; ep < phys + size; ep += 4u) {
                 uint32_t wi = ep >> 2;
@@ -523,6 +531,7 @@ static void write_json_window(FILE *f, uint32_t win_lo_page,
                 fprintf(f, "\"0x%08X\": %u", 0x80000000u | ep,
                         exec_pc_counts[wi]);
             }
+#endif
             fprintf(f, "},\n");
 
             fprintf(f, "    \"dispatch_entry_pcs\": [");
@@ -911,6 +920,11 @@ static void capture_filter_linked_static(uint32_t *dispatch_pc_bitmap,
                                          uint32_t *exec_pc_counts,
                                          uint32_t ram_size)
 {
+#ifdef __vita__
+    /* Vita does not build the execution histogram, so only the bitmaps are
+     * filtered here. */
+    (void)exec_pc_counts;
+#endif
 #ifdef PSX_HAS_OVERLAY_DISPATCH
     extern int psx_overlay_static_image_known(uint32_t addr);
     for (uint32_t bitmap_word = 0;
@@ -928,7 +942,9 @@ static void capture_filter_linked_static(uint32_t *dispatch_pc_bitmap,
                 continue;
             dispatch_pc_bitmap[bitmap_word] &= ~mask;
             exec_pc_bitmap[bitmap_word] &= ~mask;
+#ifndef __vita__
             exec_pc_counts[word] = 0u;
+#endif
         }
     }
 #else
@@ -988,8 +1004,15 @@ static uint64_t overlay_capture_write_current(const char *reason,
     dispatch_pc_bitmap = (uint32_t *)malloc(
         sizeof(g_dirty_ram_dispatch_pc_bitmap));
     exec_pc_bitmap = (uint32_t *)malloc(sizeof(g_dirty_ram_exec_pc_bitmap));
+#ifdef __vita__
+    /* Vita does not build the execution histogram, so there is nothing to
+     * snapshot; exec_pc_counts stays NULL and its consumers skip it. */
+    exec_pc_counts = NULL;
+    if (!bitmap || !dispatch_pc_bitmap || !exec_pc_bitmap) {
+#else
     exec_pc_counts = (uint32_t *)malloc(sizeof(g_dirty_ram_exec_pc_counts));
     if (!bitmap || !dispatch_pc_bitmap || !exec_pc_bitmap || !exec_pc_counts) {
+#endif
         free(bitmap);
         free(dispatch_pc_bitmap);
         free(exec_pc_bitmap);
@@ -1000,8 +1023,10 @@ static uint64_t overlay_capture_write_current(const char *reason,
            sizeof(g_dirty_ram_dispatch_pc_bitmap));
     memcpy(exec_pc_bitmap, g_dirty_ram_exec_pc_bitmap,
            sizeof(g_dirty_ram_exec_pc_bitmap));
+#ifndef __vita__
     memcpy(exec_pc_counts, g_dirty_ram_exec_pc_counts,
            sizeof(g_dirty_ram_exec_pc_counts));
+#endif
     capture_filter_linked_static(dispatch_pc_bitmap, exec_pc_bitmap,
                                  exec_pc_counts, ram_size);
     capture_executed_pages(bitmap, bw, exec_pc_bitmap,
@@ -1400,10 +1425,18 @@ static AutocapWriteJob *capture_snapshot_create(uint32_t scope_lo,
     job->dispatch_pc_bitmap = (uint32_t *)malloc(
         sizeof(g_dirty_ram_dispatch_pc_bitmap));
     job->exec_pc_bitmap = (uint32_t *)malloc(sizeof(g_dirty_ram_exec_pc_bitmap));
+#ifdef __vita__
+    /* Vita does not build the execution histogram; see the snapshot path. */
+    job->exec_pc_counts = NULL;
+    job->bitmap = (uint32_t *)malloc((size_t)bw * sizeof(uint32_t));
+    if (!job->ram || !job->dispatch_pc_bitmap ||
+        !job->exec_pc_bitmap || !job->bitmap) {
+#else
     job->exec_pc_counts = (uint32_t *)malloc(sizeof(g_dirty_ram_exec_pc_counts));
     job->bitmap = (uint32_t *)malloc((size_t)bw * sizeof(uint32_t));
     if (!job->ram || !job->dispatch_pc_bitmap ||
         !job->exec_pc_bitmap || !job->exec_pc_counts || !job->bitmap) {
+#endif
         autocap_write_job_free(job); return NULL;
     }
     memcpy(job->ram, memory_get_ram_ptr(), ram_size);
@@ -1411,8 +1444,10 @@ static AutocapWriteJob *capture_snapshot_create(uint32_t scope_lo,
            sizeof(g_dirty_ram_dispatch_pc_bitmap));
     memcpy(job->exec_pc_bitmap, g_dirty_ram_exec_pc_bitmap,
            sizeof(g_dirty_ram_exec_pc_bitmap));
+#ifndef __vita__
     memcpy(job->exec_pc_counts, g_dirty_ram_exec_pc_counts,
            sizeof(g_dirty_ram_exec_pc_counts));
+#endif
     capture_filter_linked_static(job->dispatch_pc_bitmap,
                                  job->exec_pc_bitmap,
                                  job->exec_pc_counts, ram_size);
@@ -1650,8 +1685,10 @@ void overlay_autocapture_tick(void)
          * jobs remain queued and retry; normal shutdown drains them. */
         memset(g_dirty_ram_exec_pc_bitmap, 0,
                sizeof(g_dirty_ram_exec_pc_bitmap));
+#ifndef __vita__
         memset(g_dirty_ram_exec_pc_counts, 0,
                sizeof(g_dirty_ram_exec_pc_counts));
+#endif
         memset(g_dirty_ram_dispatch_pc_bitmap, 0,
                sizeof(g_dirty_ram_dispatch_pc_bitmap));
         memset(g_dirty_ram_exec_page_bitmap, 0,

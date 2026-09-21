@@ -225,9 +225,7 @@ const char *g_dirty_ram_last_unsupported_reason = NULL;
 
 DirtyRamPcEntry g_dirty_ram_pc_table[DIRTY_RAM_PC_TABLE_SIZE] = {0};
 uint32_t g_dirty_ram_exec_pc_bitmap[DIRTY_RAM_EXEC_BITMAP_WORDS] = {0};
-#ifdef __vita__
-uint32_t g_dirty_ram_exec_pc_counts[1] = {0};
-#else
+#ifndef __vita__
 uint32_t g_dirty_ram_exec_pc_counts[DIRTY_RAM_EXEC_WORD_COUNT] = {0};
 #endif
 uint32_t g_dirty_ram_exec_page_bitmap[DIRTY_RAM_EXEC_PAGE_BITMAP_WORDS] = {0};
@@ -275,10 +273,7 @@ static inline void exec_pc_table_record(uint32_t pc) {
         uint32_t word = phys >> 2;
         uint32_t mask = 1u << (word & 31u);
         uint32_t *slot = &g_dirty_ram_exec_pc_bitmap[word >> 5];
-#ifdef __vita__
-        if (g_dirty_ram_exec_pc_counts[0] != UINT32_MAX)
-            g_dirty_ram_exec_pc_counts[0]++;
-#else
+#ifndef __vita__
         if (g_dirty_ram_exec_pc_counts[word] != UINT32_MAX)
             g_dirty_ram_exec_pc_counts[word]++;
 #endif

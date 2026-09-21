@@ -274,10 +274,9 @@ extern uint32_t g_dirty_ram_exec_pc_bitmap[DIRTY_RAM_EXEC_BITMAP_WORDS];
  * capture writer snapshots these beside the bitmap so runtime observations can
  * be bound to the complete bytes that were resident when a PC executed. */
 #ifdef __vita__
-/* Vita: nothing makes a decision on these counts (they are a write-only
- * coverage histogram), and the module loader reserves the array's full .bss
- * size at load time, so keep one bucket. */
-extern uint32_t g_dirty_ram_exec_pc_counts[1];
+/* Vita: this is a write-only coverage histogram and the module loader reserves
+ * the array's full .bss size at load time, so it is not built there at all —
+ * its writers and readers are guarded with #ifndef __vita__. */
 #else
 extern uint32_t g_dirty_ram_exec_pc_counts[DIRTY_RAM_EXEC_WORD_COUNT];
 #endif
