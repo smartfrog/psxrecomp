@@ -176,9 +176,11 @@ extern "C" void psx_game_codegen_forward_if_built(int argc, char** argv);
 #else
 #include <arpa/inet.h>
 #include <fcntl.h>
+#ifndef __vita__
 #include <ifaddrs.h>
-#include <netdb.h>
 #include <net/if.h>
+#endif
+#include <netdb.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/time.h>
@@ -12582,6 +12584,8 @@ namespace {
                 push(ip, label);
             }
         }
+#elif defined(__vita__)
+        (void)push;
 #else
         struct ifaddrs* ifa = nullptr;
         if (getifaddrs(&ifa) != 0 || !ifa) return;

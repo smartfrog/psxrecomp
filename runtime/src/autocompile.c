@@ -1,4 +1,48 @@
 /* autocompile.c — see autocompile.h. */
+#ifdef __vita__
+/*
+ * Vita: the runtime-compiler overlay backend cannot exist (no fork/exec of a
+ * host toolchain), so this builds the public API as an inert stub. Statically
+ * linked AOT overlay dispatch (the only supported path on Vita) is unaffected.
+ */
+#include "autocompile.h"
+
+#include <stdio.h>
+
+static char s_cmd[4096];
+static char s_cwd[512];
+
+void autocompile_configure(const char *cmd, const char *cwd) {
+    if (!cmd) cmd = "";
+    snprintf(s_cmd, sizeof(s_cmd), "%s", cmd);
+    snprintf(s_cwd, sizeof(s_cwd), "%s", cwd ? cwd : "");
+}
+int  autocompile_configured(void) { return s_cmd[0] != '\0'; }
+void autocompile_set_cache_paths(const char *cache_dir, const char *captures) {
+    (void)cache_dir; (void)captures;
+}
+const char *autocompile_c_compiler(void) { return NULL; }
+int  autocompile_toolchain_available(void) { return 0; }
+int  autocompile_busy(void) { return 0; }
+int  autocompile_request(void) { return 0; }
+int  autocompile_request_plan_repair(int plan_cache_ready) {
+    (void)plan_cache_ready;
+    return 0;
+}
+void autocompile_poll_main(void) {}
+void autocompile_shutdown(void) {}
+int  autocompile_status_json(char *out, int cap) {
+    if (!out || cap <= 0) return 0;
+    return snprintf(out, (size_t)cap,
+                    "{\"state\":\"idle\",\"runs\":0,\"fails\":0,"
+                    "\"degraded\":1,"
+                    "\"degraded_reason\":\"autocompile unavailable on Vita\"}");
+}
+const char *autocompile_degraded_reason(void) {
+    return "autocompile unavailable on Vita";
+}
+
+#else /* __vita__ */
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif
@@ -1703,3 +1747,5 @@ int autocompile_status_json(char *out, int cap) {
         s_publish_load_fail_run, s_publish_parse_fail_run,
         s_publish_deferred_run, tail);
 }
+
+#endif /* __vita__ */

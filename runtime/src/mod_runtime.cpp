@@ -637,6 +637,11 @@ bool run_xdelta_decode(const std::filesystem::path& executable,
         return false;
     }
     return true;
+#elif defined(__vita__)
+    (void)executable; (void)source; (void)patch; (void)output;
+    if (error) *error =
+        "derived-disc mods are unsupported on Vita (no external decoder)";
+    return false;
 #else
     const pid_t child = fork();
     if (child == 0) {

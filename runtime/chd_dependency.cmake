@@ -42,6 +42,14 @@ FetchContent_Declare(psx_libchdr
     ${_psx_libchdr_timestamp_args})
 FetchContent_MakeAvailable(psx_libchdr)
 
+if(VITA)
+    # miniz's CMakeLists forces POSITION_INDEPENDENT_CODE ON, which emits
+    # R_ARM_GOT_BREL/R_ARM_BASE_PREL relocations vita-elf-create cannot
+    # process. A Vita executable lives at a fixed base with no dynamic
+    # relocation, so compile miniz non-PIC like every other static lib here.
+    set_target_properties(miniz PROPERTIES POSITION_INDEPENDENT_CODE OFF)
+endif()
+
 unset(_psx_libchdr_src)
 unset(_psx_libchdr_url)
 unset(_psx_libchdr_hash)

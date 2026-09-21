@@ -714,6 +714,13 @@ set(PSXRECOMP_RUNTIME_INCLUDE_DIRS
     ${PSXRECOMP_ROOT}/recompiler/lib/fmt/include
     ${PSXRECOMP_ROOT}/recompiler/lib/toml11
 )
+if(VITA)
+    # gpu_gl_renderer.c calls a handful of desktop-GL 1.x entry points
+    # directly; Vita has no GL library to satisfy them, so this TU provides
+    # abort-on-call link stubs (unreachable: no GL context can exist).
+    list(APPEND PSXRECOMP_RUNTIME_SOURCES
+        ${PSXRECOMP_ROOT}/runtime/src/gpu_gl_vita_stub.c)
+endif()
 if(PSXRECOMP_LOBBY_INCLUDE_DIR)
     list(APPEND PSXRECOMP_RUNTIME_INCLUDE_DIRS ${PSXRECOMP_LOBBY_INCLUDE_DIR})
 endif()
@@ -1546,6 +1553,12 @@ function(psxrecomp_add_runtime_target target)
     # CMAKE_C_STANDARD setting. cxx_std_17 likewise — game CMakeLists may omit
     # CMAKE_CXX_STANDARD; mod_packages.cpp must not compile as a pre-17 dialect.
     target_compile_features(${target} PRIVATE c_std_11 cxx_std_17)
+    if(VITA)
+        # Vita user code runs in Thumb-2 state; the SDL2/vitasdk libraries are
+        # thumb and interworking makes ARM objects legal, but thumb gives ~30%
+        # smaller code for the runtime and generated-game TUs alike.
+        target_compile_options(${target} PRIVATE -mthumb)
+    endif()
     psxrecomp_apply_runtime_ipo(${target})
 
     if(NOT PSX_PGO STREQUAL "")
@@ -2228,6 +2241,14 @@ function(psxrecomp_add_runtime_target target)
         if(MINGW)
             target_link_libraries(${target} PRIVATE winpthread)
         endif()
+    elseif(VITA)
+        # Vita: no desktop GL and no dlfcn. gpu_gl_renderer.c compiles but its
+        # SDL_GL context init fails at runtime, falling back to the
+        # SDL_Renderer software present path (the only supported video
+        # backend on Vita); gpu_vk_renderer.c builds as an inert stub
+        # (PSX_ENABLE_VULKAN default OFF). Runtime-loaded overlay .so files
+        # do not exist, so ENABLE_EXPORTS and ${CMAKE_DL_LIBS} stay off and
+        # nothing must be linked for GL.
     else()
         # Runtime-compiled overlay .so files resolve the generated-code ABI
         # against globals and callbacks owned by the main executable.
@@ -2287,7 +2308,11 @@ function(psxrecomp_add_runtime_target target)
     # it without game projects opting in individually. This does not select the
     # runtime renderer: OpenGL remains the default in config_loader.h. Builders
     # can still use -DPSX_ENABLE_VULKAN=OFF to produce the inert stub explicitly.
-    option(PSX_ENABLE_VULKAN "Build the Vulkan renderer backend when SDK tools are available" ON)
+    if(VITA)
+        option(PSX_ENABLE_VULKAN "Build the Vulkan renderer backend when SDK tools are available" OFF)
+    else()
+        option(PSX_ENABLE_VULKAN "Build the Vulkan renderer backend when SDK tools are available" ON)
+    endif()
     if(PSX_ENABLE_VULKAN)
     # $VULKAN_SDK first; else find_path. Unset before find_path — an empty
     # normal _vk_inc makes find_path a no-op on modern CMake (Homebrew miss).

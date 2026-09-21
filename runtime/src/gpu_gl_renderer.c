@@ -8729,7 +8729,7 @@ static void native_gpu_publish_prefix(GlNativeGpuWork *work,int seal) {
     memcpy(work->published_heights,work->heights,sizeof(work->heights));
     if(!work->state) {
         work->state=NATIVE_GPU_QUEUED;s_native_gpu_work=work;
-        work->timing.queued_ns=SDL_GetTicksNS();
+        work->timing.queued_ns=psx_sdl_ticks_ns();
     } else if(work->state==NATIVE_GPU_WAIT_INPUT)work->state=NATIVE_GPU_DISPATCHING;
     work->sealed=seal;
     SDL_CondBroadcast(s_native_gpu_condition);
@@ -11589,7 +11589,7 @@ static void native_motion_prepare(GlNativeCompileAudit *audit, GlNativeViewState
     }
     /* Keep the new logical endpoint/poses even when its visual phase budget
      * has expired. Never reanchor a FIFO deadline to compile completion. */
-    if (deadline_known && (!deadline_ns || SDL_GetTicksNS() >= deadline_ns)) {
+    if (deadline_known && (!deadline_ns || psx_sdl_ticks_ns() >= deadline_ns)) {
         audit->temporal_status = deadline_ns ? GL_RENDERER_NATIVE_TEMPORAL_DEADLINE_EXPIRED
                                             : GL_RENDERER_NATIVE_TEMPORAL_WHOLE_ONLY;
         goto finished;
@@ -11637,7 +11637,7 @@ static void native_motion_prepare(GlNativeCompileAudit *audit, GlNativeViewState
         goto finished;
     }
     for (uint32_t phase = 0u; phase < phase_count; ++phase) {
-        if (deadline_known && SDL_GetTicksNS() >= deadline_ns) {
+        if (deadline_known && psx_sdl_ticks_ns() >= deadline_ns) {
             audit->temporal_status = GL_RENDERER_NATIVE_TEMPORAL_DEADLINE_EXPIRED;
             goto phases_failed;
         }
@@ -12870,7 +12870,7 @@ static int native_gpu_service(void) {
     if(state==NATIVE_GPU_QUEUED)work->state=NATIVE_GPU_DISPATCHING;
     SDL_UnlockMutex(s_native_state_mutex);
     if(!gpu_owner&&!native_context_enter())return -1;
-    const uint64_t started = SDL_GetTicksNS();
+    const uint64_t started = psx_sdl_ticks_ns();
     const uint64_t cpu_started = native_thread_cpu_ns();
     int result=0;
     if(state==NATIVE_GPU_PUBLISHED) {
@@ -12902,7 +12902,7 @@ static int native_gpu_service(void) {
         if(status!=PSXGL_TIMEOUT_EXPIRED) {
             int hashes_ok=1;
             if(status==PSXGL_ALREADY_SIGNALED||status==PSXGL_CONDITION_SATISFIED) {
-                const uint64_t latency=SDL_GetTicksNS()-work->submitted_ns;
+                const uint64_t latency=psx_sdl_ticks_ns()-work->submitted_ns;
                 GLuint64 times[3]={0};
                 if(work->timers[0])for(unsigned i=0;i<3;++i)
                     p_glGetQueryObjectui64v(work->timers[i],GL_QUERY_RESULT,&times[i]);
@@ -12917,7 +12917,7 @@ static int native_gpu_service(void) {
                 }
                 SDL_UnlockMutex(s_native_state_mutex);
                 for(unsigned i=0;i<=work->phase_count&&work->scanout;++i) {
-                    const uint64_t copy_started=SDL_GetTicksNS();
+                    const uint64_t copy_started=psx_sdl_ticks_ns();
                     const size_t bytes=(size_t)work->images[i].width*work->images[i].height*4u;
                     p_glBindBuffer(PSXGL_PIXEL_PACK_BUFFER,work->readbacks[i]);
                     const void *pixels=p_glMapBufferRange(PSXGL_PIXEL_PACK_BUFFER,0,bytes,PSXGL_MAP_READ_BIT);
@@ -12939,7 +12939,7 @@ static int native_gpu_service(void) {
                         else hashes_ok=0;
                     }
                     const uint64_t hash_started=native_thread_cpu_ns();
-                    if (!i) work->timing.hash_begin_ns=SDL_GetTicksNS();
+                    if (!i) work->timing.hash_begin_ns=psx_sdl_ticks_ns();
                     work->image_digests[i]=pres_hash_bytes(pixels,bytes);
                     if (!i) {
                         const uint32_t *rgba=pixels;
@@ -12947,7 +12947,7 @@ static int native_gpu_service(void) {
                             work->visible_pixels+=(rgba[p]&UINT32_C(0x00ffffff))!=0u;
                     }
                     work->timing.hash_cpu_ns+=native_thread_cpu_ns()-hash_started;
-                    work->timing.hash_end_ns=SDL_GetTicksNS();
+                    work->timing.hash_end_ns=psx_sdl_ticks_ns();
                     if (!i) {
                         const uint32_t *rgba=pixels;
                         if (gl_renderer_native_guest_reference_enabled()) {
@@ -12960,7 +12960,7 @@ static int native_gpu_service(void) {
                         }
                     }
                     if(!p_glUnmapBuffer(PSXGL_PIXEL_PACK_BUFFER)){hashes_ok=0;break;}
-                    work->timing.copy_ns+=SDL_GetTicksNS()-copy_started;
+                    work->timing.copy_ns+=psx_sdl_ticks_ns()-copy_started;
                 }
                 p_glBindBuffer(PSXGL_PIXEL_PACK_BUFFER,0);
             }
@@ -12972,7 +12972,7 @@ static int native_gpu_service(void) {
                     s_native_compiler_diag.gpu.readback_bytes+=(size_t)work->images[0].width*work->images[0].height*4u*(work->phase_count+1u);
                 }
             }
-            work->timing.ready_ns=SDL_GetTicksNS();
+            work->timing.ready_ns=psx_sdl_ticks_ns();
             work->timing.service_ns+=work->timing.ready_ns-started;
             work->timing.service_cpu_ns+=native_thread_cpu_ns()-cpu_started;
             work->state=NATIVE_GPU_READY;SDL_UnlockMutex(s_native_state_mutex);result=work->failed?-1:1;
@@ -13072,11 +13072,11 @@ static int native_gpu_service(void) {
                 i = end - 1u;
             } else ok=native_gpu_render_command(work,command,snapshots,captured_data,command_first_vertex,NULL);
             work->cursor=i+1u;
-            if(!gpu_owner&&ok&&work->cursor<command_limit&&SDL_GetTicksNS()-started>=1000000u) {
+            if(!gpu_owner&&ok&&work->cursor<command_limit&&psx_sdl_ticks_ns()-started>=1000000u) {
                 /* Resume the exact next FIFO command on the next owner service.
                  * No fence, endpoint or canonical state is published yet. */
                 glFlush();
-                work->timing.service_ns+=SDL_GetTicksNS()-started;
+                work->timing.service_ns+=psx_sdl_ticks_ns()-started;
                 work->timing.service_cpu_ns+=native_thread_cpu_ns()-cpu_started;
                 result=1;
                 goto service_done;
@@ -13086,7 +13086,7 @@ static int native_gpu_service(void) {
             glFlush();
             SDL_LockMutex(s_native_state_mutex);
             work->render_failed|=!ok;
-            work->timing.service_ns+=SDL_GetTicksNS()-started;
+            work->timing.service_ns+=psx_sdl_ticks_ns()-started;
             work->timing.service_cpu_ns+=native_thread_cpu_ns()-cpu_started;
             work->state=work->cancel_requested?NATIVE_GPU_CANCELLED:
                 (work->sealed||work->published_count>work->cursor?NATIVE_GPU_DISPATCHING:NATIVE_GPU_WAIT_INPUT);
@@ -13136,9 +13136,9 @@ static int native_gpu_service(void) {
         for(unsigned i=0;i<GL_NATIVE_GPU_PLANES;++i)native_gpu_plane_free(&snapshots[i]);
         if(work->timers[0])p_glQueryCounter(work->timers[2],GL_TIMESTAMP);
         work->fence=ok?p_glFenceSync(PSXGL_SYNC_GPU_COMMANDS_COMPLETE,0):NULL;glFlush();
-        work->submitted_ns=SDL_GetTicksNS();
+        work->submitted_ns=psx_sdl_ticks_ns();
         work->timing.dispatch_end_ns=work->submitted_ns;
-        work->timing.service_ns+=SDL_GetTicksNS()-started;
+        work->timing.service_ns+=psx_sdl_ticks_ns()-started;
         work->timing.service_cpu_ns+=native_thread_cpu_ns()-cpu_started;
         ok=ok&&work->fence&&!native_drain_gl_errors();
         SDL_LockMutex(s_native_state_mutex);
@@ -13158,7 +13158,7 @@ static int native_gpu_service(void) {
     }
 service_done:
     if(!gpu_owner)native_context_leave();
-    const uint64_t elapsed=SDL_GetTicksNS()-started;
+    const uint64_t elapsed=psx_sdl_ticks_ns()-started;
     SDL_LockMutex(s_native_state_mutex);s_native_compiler_diag.gpu.service_ns+=elapsed;
     if(state==NATIVE_GPU_QUEUED||state==NATIVE_GPU_DISPATCHING)s_native_compiler_diag.gpu.submit_ns+=elapsed;
     if(state==NATIVE_GPU_SUBMITTED)s_native_compiler_diag.gpu.finish_ns+=elapsed;
@@ -13343,7 +13343,7 @@ static XgRenderCompileResult native_worker_compile(XgRenderSourceCommitHandle co
     uint64_t source_deadline_ns = 0u;
     int deadline_known;
     GlNativeGpuWork *gpu = NULL;
-    GlNativeWorkTiming timing={.begin_ns=SDL_GetTicksNS()};
+    GlNativeWorkTiming timing={.begin_ns=psx_sdl_ticks_ns()};
     const uint64_t compile_cpu_started=native_thread_cpu_ns();
     (void)user_data;
 
@@ -13483,7 +13483,7 @@ static XgRenderCompileResult native_worker_compile(XgRenderSourceCommitHandle co
     }
     if (native_work && needs_endpoint) {
         const uint64_t phase_started = native_thread_cpu_ns();
-        if (gpu) gpu->timing.phase_begin_ns = SDL_GetTicksNS();
+        if (gpu) gpu->timing.phase_begin_ns = psx_sdl_ticks_ns();
         native_motion_prepare(audit, staged_views, native_vram, compiled_pixels, &motion, deadline_known, source_deadline_ns);
         if (gpu) gpu->timing.phase_cpu_ns = native_thread_cpu_ns() - phase_started;
     }
@@ -13764,7 +13764,7 @@ gpu_ready:
     result = XG_RENDER_COMPILE_ENDPOINT_READY;
 
 compile_complete:
-    timing.end_ns=SDL_GetTicksNS();timing.identity=audit->header.identity;timing.digest=audit->endpoint_pixel_digest;
+    timing.end_ns=psx_sdl_ticks_ns();timing.identity=audit->header.identity;timing.digest=audit->endpoint_pixel_digest;
     timing.temporal_status=audit->temporal_status;
     if(!timing.gpu)timing.compile_cpu_ns=native_thread_cpu_ns()-compile_cpu_started;
     if(s_native_work_timing_count<8192u)s_native_work_timing[s_native_work_timing_count++]=timing;
@@ -14240,7 +14240,7 @@ static void native_presenter_swap(void *user_data) {
 
 static uint64_t native_present_clock_ns(void *user_data) {
     (void)user_data;
-    return SDL_GetTicksNS();
+    return psx_sdl_ticks_ns();
 }
 
 int gl_renderer_native_init_services(
@@ -14356,7 +14356,7 @@ int gl_renderer_native_init_services(
 #if defined(CLOCK_MONOTONIC)
     struct timespec timing_now;
     clock_gettime(CLOCK_MONOTONIC,&timing_now);
-    s_native_timing_origin=(uint64_t)timing_now.tv_sec*1000000000u+timing_now.tv_nsec-SDL_GetTicksNS();
+    s_native_timing_origin=(uint64_t)timing_now.tv_sec*1000000000u+timing_now.tv_nsec-psx_sdl_ticks_ns();
 #endif
     static int timing_exit_registered;
     if(!timing_exit_registered&&getenv("PSX_NATIVE_TIMING_OUT")) {

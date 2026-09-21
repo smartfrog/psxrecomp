@@ -50,7 +50,9 @@ int psx_overlay_cache_name_parse(const char *name, uint32_t *region_start,
 #ifndef _WIN32
 
 #include <dirent.h>
+#if !defined(__vita__)
 #include <dlfcn.h>
+#endif
 #include <sys/stat.h>
 
 int psx_overlay_posix_scan_cache_dir(const char *dir,
@@ -119,6 +121,12 @@ int psx_overlay_posix_find_other_cache_tag(const char *base_dir,
 
 void *psx_overlay_posix_library_open(const char *path, char *error,
                                      size_t error_size) {
+#if defined(__vita__)
+    (void)path;
+    if (error && error_size)
+        snprintf(error, error_size, "dynamic overlay loading unsupported on Vita");
+    return NULL;
+#else
     dlerror();
     void *handle = dlopen(path, RTLD_NOW | RTLD_LOCAL);
     if (!handle && error && error_size) {
@@ -126,10 +134,16 @@ void *psx_overlay_posix_library_open(const char *path, char *error,
         snprintf(error, error_size, "%s", message ? message : "unknown dlopen error");
     }
     return handle;
+#endif
 }
 
 void *psx_overlay_posix_library_symbol(void *handle, const char *name) {
+#if defined(__vita__)
+    (void)handle; (void)name;
+    return NULL;
+#else
     return handle ? dlsym(handle, name) : NULL;
+#endif
 }
 
 void *psx_overlay_posix_library_entry(void *handle, uint32_t entry) {
@@ -139,7 +153,11 @@ void *psx_overlay_posix_library_entry(void *handle, uint32_t entry) {
 }
 
 void psx_overlay_posix_library_close(void *handle) {
+#if defined(__vita__)
+    (void)handle;
+#else
     if (handle) dlclose(handle);
+#endif
 }
 
 #else

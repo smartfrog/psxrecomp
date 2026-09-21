@@ -262,9 +262,19 @@ static inline SDL_ThreadID psx_sdl_thread_id(void)
 
 #else
 
+#include <stdbool.h>
 #include <SDL.h>
 
 #endif
+
+static inline Uint64 psx_sdl_ticks_ns(void)
+{
+#if defined(PSX_SDL3)
+    return SDL_GetTicksNS();
+#else
+    return (Uint64)SDL_GetTicks64() * UINT64_C(1000000);
+#endif
+}
 
 #if defined(PSX_SDL3)
 typedef SDL_JoystickID PsxSdlVirtualJoystickID;
