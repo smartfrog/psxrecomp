@@ -40,7 +40,11 @@ typedef struct GuestRenderNativeCommandIndex {
 } GuestRenderNativeCommandIndex;
 
 #define GUEST_RENDER_NATIVE_CONSUMED_CAPACITY 256u
+#ifdef __vita__
+#define GUEST_RENDER_NATIVE_COMMAND_INDEX_CAPACITY 1024u
+#else
 #define GUEST_RENDER_NATIVE_COMMAND_INDEX_CAPACITY 8192u
+#endif
 
 static struct {
     GuestRenderNativeStreamEntry entries[GUEST_RENDER_NATIVE_STREAM_CAPACITY];

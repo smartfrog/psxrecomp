@@ -40,7 +40,11 @@ extern "C" {
 #endif
 
 /* 64K entries * 48 bytes ~= 3 MB. Covers many frames of transition activity. */
+#ifdef __vita__
+#define EVENT_RING_CAP (1u << 11)   /* Vita: 2048 events */
+#else
 #define EVENT_RING_CAP (1u << 16)
+#endif
 
 typedef enum {
     EV_NONE        = 0,

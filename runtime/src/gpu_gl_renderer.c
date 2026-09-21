@@ -857,7 +857,11 @@ static int s_native_host_semantic_history_valid;
 static GlRendererSemanticProducerItemDiagnostics
     s_native_host_diag_primitives[NATIVE_HOST_DIAG_PRIMITIVE_CAP];
 static uint64_t s_native_host_diag_primitive_total;
+#ifdef __vita__
+#define RETIRED_FAILURE_EVENT_CAP 512u
+#else
 #define RETIRED_FAILURE_EVENT_CAP 131072u
+#endif
 #define RETIRED_ISSUE_SCRATCH_CAP \
     (GPU_SEMANTIC_WORKLOAD_CAPACITY * GPU_RENDER_SEMANTIC_TRIANGLE_CAPACITY * 3u)
 static GlRendererRetiredFailureEvent
@@ -866,7 +870,11 @@ static GpuSemanticWorkloadRetiredIssue
     s_retired_issue_scratch[RETIRED_ISSUE_SCRATCH_CAP];
 static uint64_t s_retired_failure_event_count;
 static uint64_t s_retired_failure_event_overflow;
+#ifdef __vita__
+#define PRODUCER_DIAG_VERTEX_CAP 1024u
+#else
 #define PRODUCER_DIAG_VERTEX_CAP 32768u
+#endif
 typedef struct ProducerDiagVertex {
     uint64_t scene_id;
     uint32_t producer_id;
@@ -1242,7 +1250,12 @@ typedef struct GlNativePhaseProducer {
     XgPresentationIdentity identity;
     uint32_t phase, producer, draws, moved_draws, moved_vertices;
 } GlNativePhaseProducer;
+#ifdef __vita__
+#define GL_NATIVE_PHASE_PRODUCER_CAP 1024u
+static GlNativePhaseProducer s_native_phase_producers[GL_NATIVE_PHASE_PRODUCER_CAP];
+#else
 static GlNativePhaseProducer s_native_phase_producers[65536];
+#endif
 static uint32_t s_native_phase_producer_count;
 static volatile uint64_t s_native_coverage_acquires, s_native_coverage_releases, s_native_coverage_release_errors;
 static volatile uint64_t s_native_coverage_publications;
@@ -1265,7 +1278,11 @@ typedef struct GlNativeMotionRejectEvent {
 } GlNativeMotionRejectEvent;
 static volatile GlNativeMotionRejectEvent s_native_motion_reject_events[32];
 static volatile uint64_t s_native_motion_reject_total;
+#ifdef __vita__
+#define GL_NATIVE_VIEW_TARGET_CAPACITY 8u
+#else
 #define GL_NATIVE_VIEW_TARGET_CAPACITY 64u
+#endif
 typedef struct GlNativeViewDomain {
     uint32_t *pixels; /* One extended framebuffer, addressed by physical VRAM Y. */
     uint16_t x, width;
@@ -1335,7 +1352,12 @@ typedef struct GlNativeWorkTiming {
     uint32_t width, height, scale, commands, phases, gpu;
     uint32_t temporal_status, fresh, operations;
 } GlNativeWorkTiming;
+#ifdef __vita__
+#define GL_NATIVE_WORK_TIMING_CAP 512u
+static GlNativeWorkTiming s_native_work_timing[GL_NATIVE_WORK_TIMING_CAP];
+#else
 static GlNativeWorkTiming s_native_work_timing[8192];
+#endif
 static unsigned s_native_work_timing_count;
 static uint64_t s_native_timing_origin;
 static uint64_t native_thread_cpu_ns(void) {
@@ -1352,7 +1374,11 @@ static void native_work_timing_dump(void) {
     FILE *f=fopen(path,"w");
     if(!f)return;
     fputs("epoch,sequence,vblank,gpu,scale,width,height,commands,phases,digest,begin_ns,compile_cpu_ns,queued_ns,dispatch_begin_ns,dispatch_end_ns,ready_ns,hash_begin_ns,hash_end_ns,hash_cpu_ns,end_ns,service_ns,service_cpu_ns,copy_ns,deadline_ns,previous_vblank,previous_cycle,temporal_status,fresh,operations,native_cpu_ns,phase_cpu_ns,phase_begin_ns,reference_digest\n",f);
+#ifdef __vita__
+    for(unsigned i=0;i<s_native_work_timing_count&&i<GL_NATIVE_WORK_TIMING_CAP;++i) {
+#else
     for(unsigned i=0;i<s_native_work_timing_count&&i<8192u;++i) {
+#endif
         GlNativeWorkTiming absolute=s_native_work_timing[i];
         uint64_t *clocks[]={&absolute.begin_ns,&absolute.queued_ns,&absolute.dispatch_begin_ns,
             &absolute.dispatch_end_ns,&absolute.ready_ns,&absolute.hash_begin_ns,&absolute.hash_end_ns,&absolute.end_ns,
@@ -1725,7 +1751,11 @@ static void up_add_transfer(int x, int y, int w, int h) {
  * the event following a FLUSH names the trigger. 16 B * 64 Ki = 1 MB. */
 extern uint64_t s_frame_count;  /* defined in debug_server.c */
 
+#ifdef __vita__
+#define GL_COH_RING_CAP 256u
+#else
 #define GL_COH_RING_CAP (1u << 16)
+#endif
 static GlCohEvent s_coh_ring[GL_COH_RING_CAP];
 static uint64_t   s_coh_seq = 0;
 
@@ -10918,7 +10948,11 @@ static int native_recipe_render_rows(const GlNativeRecipe *recipe, const GlNativ
     *out_pixels = pixels; pixels = NULL; ok = 1;
 finished:
     if (ok && gpu)
+#ifdef __vita__
+        for (uint32_t i = 0u; i < producer_count && s_native_phase_producer_count < GL_NATIVE_PHASE_PRODUCER_CAP; ++i)
+#else
         for (uint32_t i = 0u; i < producer_count && s_native_phase_producer_count < 65536u; ++i)
+#endif
             s_native_phase_producers[s_native_phase_producer_count++] = producers[i];
     free(pixels); free(audit);
     return ok;
@@ -13767,7 +13801,11 @@ compile_complete:
     timing.end_ns=psx_sdl_ticks_ns();timing.identity=audit->header.identity;timing.digest=audit->endpoint_pixel_digest;
     timing.temporal_status=audit->temporal_status;
     if(!timing.gpu)timing.compile_cpu_ns=native_thread_cpu_ns()-compile_cpu_started;
+#ifdef __vita__
+    if(s_native_work_timing_count<GL_NATIVE_WORK_TIMING_CAP)s_native_work_timing[s_native_work_timing_count++]=timing;
+#else
     if(s_native_work_timing_count<8192u)s_native_work_timing[s_native_work_timing_count++]=timing;
+#endif
     free(compiled_pixels);
     native_motion_discard(&motion);
     free(staged_views);

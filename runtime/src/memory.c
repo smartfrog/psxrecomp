@@ -948,8 +948,10 @@ static inline void overlay_watch_note_write(uint32_t phys, uint32_t size) {
         uint32_t bitmap_word = pg * (4096u / 4u / 32u);
         memset(&g_dirty_ram_exec_pc_bitmap[bitmap_word], 0,
                (4096u / 4u / 32u) * sizeof(uint32_t));
+#ifndef __vita__
         memset(&g_dirty_ram_exec_pc_counts[pg * (4096u / 4u)], 0,
                (4096u / 4u) * sizeof(uint32_t));
+#endif
         memset(&g_dirty_ram_dispatch_pc_bitmap[bitmap_word], 0,
                (4096u / 4u / 32u) * sizeof(uint32_t));
         g_dirty_ram_exec_page_bitmap[pg >> 5] &= ~(1u << (pg & 31u));

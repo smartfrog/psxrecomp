@@ -273,7 +273,14 @@ extern uint32_t g_dirty_ram_exec_pc_bitmap[DIRTY_RAM_EXEC_BITMAP_WORDS];
 /* Exact retired-instruction counts for the same coherent capture epoch. The
  * capture writer snapshots these beside the bitmap so runtime observations can
  * be bound to the complete bytes that were resident when a PC executed. */
+#ifdef __vita__
+/* Vita: nothing makes a decision on these counts (they are a write-only
+ * coverage histogram), and the module loader reserves the array's full .bss
+ * size at load time, so keep one bucket. */
+extern uint32_t g_dirty_ram_exec_pc_counts[1];
+#else
 extern uint32_t g_dirty_ram_exec_pc_counts[DIRTY_RAM_EXEC_WORD_COUNT];
+#endif
 /* One bit per 4 KiB page. RAM writes use this as a one-test stale-evidence
  * guard; they clear that page's capture bits rather than serializing from the
  * universal store hot path. */

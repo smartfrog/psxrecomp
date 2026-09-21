@@ -121,7 +121,12 @@ extern uint32_t g_debug_last_store_pc;
 /* 1M entries × ~32B = 32 MB. Power of 2 so wrap is a mask. Beetle peaks at
  * a few hundred audible-voice events per chime second; recomp at <1k total
  * per chime. 1M gives ~minutes of headroom for game-scene capture too. */
+#ifdef __vita__
+/* Vita: 4096 entries — the module loader reserves .bss memsz at load time. */
+#define SPU_EVENT_CAP (1u << 12)
+#else
 #define SPU_EVENT_CAP (1u << 20)
+#endif
 static SpuEvent  s_events[SPU_EVENT_CAP];
 static uint32_t  s_event_idx = 0;
 static uint64_t  s_event_seq = 0;

@@ -109,7 +109,11 @@ static uint32_t gpu_ot_polls_this_walk;
  * buffers and are excluded to keep the ring focused on overlay loads.
  * Surfaced via the cd_read_log TCP command; pairs with overlay_dump to map
  * overlay regions back to disc positions for extract_overlays.py. */
+#ifdef __vita__
+#define CD_DMA_LOG_CAP 1024
+#else
 #define CD_DMA_LOG_CAP 65536
+#endif
 typedef struct { int lba; uint32_t dest; uint32_t size; } CdDmaEntry;
 static CdDmaEntry cd_dma_log[CD_DMA_LOG_CAP];
 static uint32_t   cd_dma_log_head  = 0;

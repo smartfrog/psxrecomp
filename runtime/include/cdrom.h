@@ -252,9 +252,16 @@ typedef struct CDROMTraceEntry {
     int read_delay;
 } CDROMTraceEntry;
 
+#ifdef __vita__
+/* Vita: module-loader .bss budget (see fntrace.h). */
+#define CDROM_TRACE_CAP (1 << 10)
+#define CDROM_COMMAND_HISTORY_CAP (1 << 9)
+#define CDROM_SECTOR_HISTORY_CAP (1 << 9)
+#else
 #define CDROM_TRACE_CAP (1 << 16)
 #define CDROM_COMMAND_HISTORY_CAP (1 << 13)
 #define CDROM_SECTOR_HISTORY_CAP (1 << 13)
+#endif
 #define CDROM_SECTOR_HISTORY_BYTES 128
 
 typedef struct CDROMCommandHistoryEntry {

@@ -4,8 +4,10 @@
 #include <limits.h>
 #include <string.h>
 
+#ifndef __vita__
 _Static_assert(GPU_SEMANTIC_WORKLOAD_CAPACITY >= 4096u,
                "online workloads require at least 4096 entries");
+#endif
 _Static_assert(GPU_SEMANTIC_WORKLOAD_CAPACITY <= INT32_MAX,
                "match indices must fit in int32_t");
 
@@ -27,15 +29,27 @@ typedef struct GpuSemanticPhasePosition {
     GpuRenderFixed16_16 native_y;
 } GpuSemanticPhasePosition;
 
+#ifdef __vita__
+#define GPU_SEMANTIC_ANCHOR_CAPACITY 2048u
+#else
 #define GPU_SEMANTIC_ANCHOR_CAPACITY 32768u
+#endif
 typedef struct GpuSemanticAnchorFrame {
     GpuRenderInterpolationVertexAnchor items[GPU_SEMANTIC_ANCHOR_CAPACITY];
     size_t count;
     bool overflowed;
 } GpuSemanticAnchorFrame;
 
+#ifdef __vita__
+#define GPU_SEMANTIC_WORKLOAD_HASH_CAPACITY 512u
+#else
 #define GPU_SEMANTIC_WORKLOAD_HASH_CAPACITY 8192u
+#endif
+#ifdef __vita__
+#define GPU_SEMANTIC_VERTEX_HASH_CAPACITY 4096u
+#else
 #define GPU_SEMANTIC_VERTEX_HASH_CAPACITY 65536u
+#endif
 #define GPU_SEMANTIC_MAX_VERTICES \
     (GPU_RENDER_SEMANTIC_TRIANGLE_CAPACITY * 3u)
 #define GPU_SEMANTIC_RETROSPECTIVE_CANDIDATE_LIMIT 1024u

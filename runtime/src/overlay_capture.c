@@ -1090,8 +1090,10 @@ void overlay_capture_before_dma(uint32_t load_addr, uint32_t size)
     uint32_t bitmap_words = (last_word - first_word) >> 5;
     memset(&g_dirty_ram_exec_pc_bitmap[first_bitmap_word], 0,
            (size_t)bitmap_words * sizeof(uint32_t));
+#ifndef __vita__
     memset(&g_dirty_ram_exec_pc_counts[first_word], 0,
            (size_t)(last_word - first_word) * sizeof(uint32_t));
+#endif
     memset(&g_dirty_ram_dispatch_pc_bitmap[first_bitmap_word], 0,
            (size_t)bitmap_words * sizeof(uint32_t));
     for (uint32_t page = first_page; page <= last_page; page++)

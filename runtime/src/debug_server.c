@@ -194,7 +194,11 @@ uint64_t g_fp_mmio_hash  = 1469598103934665603ULL;  /* SEPARATE: device-register
 uint64_t g_fp_mmio_count = 0;
 uint64_t g_fp_sp_hash    = 1469598103934665603ULL;  /* SEPARATE: scratchpad (0x1F8000xx) writes */
 uint64_t g_fp_sp_count   = 0;
+#ifdef __vita__
+#define FP_RING_CAP 1024
+#else
 #define FP_RING_CAP 32768
+#endif
 typedef struct { uint32_t frame; uint64_t wr_hash; uint64_t pc_hash; uint64_t wcount;
                  uint64_t mmio_hash; uint64_t mmio_count;
                  uint64_t sp_hash; uint64_t sp_count; uint64_t cyc; } FpEntry;
@@ -271,7 +275,11 @@ static void fp_snapshot(uint32_t frame)
  * writes (previously the blind spot), MMIO writes, and MMIO reads. The literal
  * first divergent ACCESS (read or write) is the first index whose tuple differs
  * between two runs. */
+#ifdef __vita__
+#define REC_CAP 8192
+#else
 #define REC_CAP 400000
+#endif
 #define REC_KIND_RAM_W   0   /* main-RAM write   */
 #define REC_KIND_SP_W    1   /* scratchpad write */
 #define REC_KIND_MMIO_W  2   /* device-register write */
@@ -589,7 +597,11 @@ uint64_t g_dispatch_static_hits = 0;
  * 1<<22 entries x 32 bytes = 128 MiB. This is intentionally much larger
  * than the old 64K ring because BIOS pad/card polling can burn through
  * tens of thousands of MMIO writes before a useful post-failure query. */
+#ifdef __vita__
+#define SIO_PC_TRACE_CAP (1 << 10)
+#else
 #define SIO_PC_TRACE_CAP (1 << 18)
+#endif
 typedef struct {
     uint64_t seq;
     uint32_t pc;            /* g_debug_last_store_pc at the moment of write */
@@ -606,7 +618,11 @@ static uint64_t s_sio_pc_trace_seq = 0;
 /* Compact register sidecar for SIO_CTRL writes.  The broad SIO PC ring keeps
  * the long timeline; this smaller ring carries the CPU state needed to explain
  * BIOS chain-driver branch decisions around SELECT resets. */
+#ifdef __vita__
+#define SIO_CTRL_REG_TRACE_CAP (1 << 9)
+#else
 #define SIO_CTRL_REG_TRACE_CAP (1 << 16)
+#endif
 typedef struct {
     uint64_t seq;
     uint32_t pc;
@@ -638,7 +654,11 @@ static uint64_t s_sio_ctrl_reg_trace_seq = 0;
  * the high-volume SIO/MMIO rings show what happened on the bus, while this
  * ring shows whether exception nonlocal control flow skipped a callback's
  * normal return-value cleanup. */
+#ifdef __vita__
+#define RESTORE_TRACE_CAP (1 << 9)
+#else
 #define RESTORE_TRACE_CAP (1 << 16)
+#endif
 typedef struct {
     uint64_t seq;
     uint32_t kind;
@@ -669,7 +689,11 @@ typedef struct {
 static PSX_BSS RestoreTraceEntry s_restore_trace[RESTORE_TRACE_CAP];
 static uint64_t s_restore_trace_seq = 0;
 
+#ifdef __vita__
+#define THREAD_TRACE_CAP (1 << 9)
+#else
 #define THREAD_TRACE_CAP (1 << 16)
+#endif
 typedef struct {
     uint64_t seq;
     uint32_t kind;
@@ -718,7 +742,11 @@ typedef struct {
 static PSX_BSS ThreadTraceEntry s_thread_trace[THREAD_TRACE_CAP];
 static uint64_t s_thread_trace_seq = 0;
 
+#ifdef __vita__
+#define SREG_TRACE_CAP (1 << 9)
+#else
 #define SREG_TRACE_CAP (1 << 18)
+#endif
 typedef struct {
     uint64_t seq;
     uint32_t tcb;
@@ -749,7 +777,11 @@ static PSX_BSS SregTraceEntry s_sreg_trace[SREG_TRACE_CAP];
 static uint64_t s_sreg_trace_seq = 0;
 static SregLastEntry s_sreg_last[32];
 
+#ifdef __vita__
+#define PROBE_TRACE_CAP (1 << 9)
+#else
 #define PROBE_TRACE_CAP (1 << 16)
+#endif
 typedef struct {
     uint64_t seq;
     uint32_t pc;
@@ -1095,7 +1127,11 @@ void debug_server_log_sio_write(uint32_t addr, uint32_t value, uint8_t width) {
 /* ---- Dispatch trace ring buffer ----
  * Records every dispatched function address for post-mortem analysis.
  * 64K entries, stack-allocated (256 KB). */
+#ifdef __vita__
+#define DISPATCH_TRACE_CAP (1 << 10)
+#else
 #define DISPATCH_TRACE_CAP (1 << 16)
+#endif
 static PSX_BSS uint32_t s_dispatch_ring[DISPATCH_TRACE_CAP];
 static uint64_t s_dispatch_seq = 0;
 
@@ -1104,7 +1140,11 @@ static uint64_t s_dispatch_seq = 0;
  * generated function AND doesn't match any trampoline pattern in
  * traps.c. Used to identify functions the recompiler missed.
  * 64K entries × 44 bytes = 2.75 MB. Replaces the prior file-based log. */
+#ifdef __vita__
+#define UNKNOWN_DISPATCH_CAP (1 << 10)
+#else
 #define UNKNOWN_DISPATCH_CAP (1 << 16)
+#endif
 typedef struct {
     uint64_t seq;
     uint32_t addr;
@@ -1207,7 +1247,11 @@ static int dispatch_trace_contains(uint32_t target) {
  * read or 1..4 detection). Other dispatches go through trace_dispatch
  * untouched. */
 /* 64K entries × ~24 B ≈ 1.5 MB; holds tens of minutes of chain transitions. */
+#ifdef __vita__
+#define CHAIN_TRACE_CAP (1 << 9)
+#else
 #define CHAIN_TRACE_CAP (1 << 16)
+#endif
 typedef struct {
     uint64_t seq;
     uint32_t prev_target;     /* phys addr of the dispatch that just returned */
@@ -1336,7 +1380,11 @@ static uint64_t s_call_focus_seq = 0;
  * during Tomba title/menu polling, so it rotates away the card-read setup
  * before we can inspect a later hang. This ring records only the BIOS public
  * card state machine and the low-level RAM card service boundary. */
+#ifdef __vita__
+#define CARD_MGR_TRACE_CAP 512
+#else
 #define CARD_MGR_TRACE_CAP 65536
+#endif
 typedef struct {
     uint64_t seq;
     uint32_t func_addr;
@@ -2234,7 +2282,11 @@ void debug_server_log_call_entry(uint32_t func_addr) {
 
 /* Always-on A0/B0/C0 BIOS-call ring (ported from ape-fw for good-vs-bad
  * event-delivery comparison). Recorded at the central dispatch chokepoint. */
+#ifdef __vita__
+#define BIOSCALL_RING_CAP (1 << 9)
+#else
 #define BIOSCALL_RING_CAP (1 << 16)
+#endif
 typedef struct {
     uint64_t seq; uint32_t table_base; uint32_t index; uint32_t func_ptr;
     uint32_t a0, a1, a2, a3; uint32_t ra; uint32_t current_func; uint32_t frame;
@@ -11635,7 +11687,11 @@ void debug_server_log_call_entry_cpu(uint32_t func_addr, CPUState *cpu) {
  * comparison): card state table 0x9F20, result flags 0xB9D0, byte counter 0x72F0,
  * chain success 0x7520, chain ptrs 0x7528, and the EvCB card-event entries
  * 0xE044-0xE0D0 (status/spec/mode). Sparse => no eviction over a session. */
+#ifdef __vita__
+#define CARD_TRACE_CAP (1u << 9)
+#else
 #define CARD_TRACE_CAP (1u << 16)
+#endif
 typedef struct {
     uint64_t seq; uint32_t phys; uint32_t old_val; uint32_t new_val;
     uint32_t pc; uint32_t cpu_pc; uint32_t ra; uint32_t func; uint32_t frame;
@@ -16183,7 +16239,11 @@ static void handle_overlay_native_ring(int id, const char *json)
 {
     (void)json;
     extern int overlay_loader_dump_native_ring(char *out, int cap);
+#ifdef __vita__
+    static char rbuf[128 * 1024];
+#else
     static char rbuf[2 * 1024 * 1024];
+#endif
     int len = overlay_loader_dump_native_ring(rbuf, (int)sizeof(rbuf));
     if (len < 0) len = 0;
     int cap = len + 128;
@@ -17066,7 +17126,13 @@ static void handle_xlate(int id, const char *json)
     extern int text_xlate_debug_json(const char *subcmd, char *out, int cap);
     char sub[32] = {0};
     if (!json_get_str(json, "sub", sub, sizeof(sub))) strcpy(sub, "stats");
+#ifdef __vita__
+    /* Vita: send_fmt's own buffer is 64 KiB, so a larger dump buffer is dead
+     * weight in the loader's .bss reservation. */
+    static char buf[128 * 1024];
+#else
     static char buf[1 << 20];   /* 1 MB — the inventory dump can be large */
+#endif
     int n = text_xlate_debug_json(sub, buf, (int)sizeof(buf));
     if (n < 0) n = 0;
     if (n < (int)sizeof(buf)) buf[n] = 0; else buf[sizeof(buf) - 1] = 0;
@@ -17115,7 +17181,11 @@ static void handle_xprobe(int id, const char *json)
 {
     (void)json;
     extern int dirty_ram_xprobe_json(char *out, int cap);
+#ifdef __vita__
+    static char buf[128 * 1024];
+#else
     static char buf[1048576];
+#endif
     /* send_fmt's formatting buffer is 64KB — cap the live dump (summary + a
      * detail window) under that. The full rings go to the crash report file. */
     dirty_ram_xprobe_json(buf, 56000);

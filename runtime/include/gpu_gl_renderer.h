@@ -1185,7 +1185,14 @@ typedef enum GlNativeMidpointDecision {
     GL_NATIVE_MIDPOINT_DECISION_COUNT,
 } GlNativeMidpointDecision;
 
+#ifdef __vita__
+/* Vita: gpu_gl_renderer.c never gets a GL context (no GL library is linked),
+ * so every one of its rings is inert; the reservation only has to fit the
+ * module loader's .bss budget. */
+#define GL_PRES_RING_CAPACITY 128u
+#else
 #define GL_PRES_RING_CAPACITY 8192u
+#endif
 
 typedef struct {
     uint32_t frame;        /* s_frame_count at swap                        */

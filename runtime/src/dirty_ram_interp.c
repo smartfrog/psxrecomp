@@ -225,7 +225,11 @@ const char *g_dirty_ram_last_unsupported_reason = NULL;
 
 DirtyRamPcEntry g_dirty_ram_pc_table[DIRTY_RAM_PC_TABLE_SIZE] = {0};
 uint32_t g_dirty_ram_exec_pc_bitmap[DIRTY_RAM_EXEC_BITMAP_WORDS] = {0};
+#ifdef __vita__
+uint32_t g_dirty_ram_exec_pc_counts[1] = {0};
+#else
 uint32_t g_dirty_ram_exec_pc_counts[DIRTY_RAM_EXEC_WORD_COUNT] = {0};
+#endif
 uint32_t g_dirty_ram_exec_page_bitmap[DIRTY_RAM_EXEC_PAGE_BITMAP_WORDS] = {0};
 uint32_t g_dirty_ram_dispatch_pc_bitmap[DIRTY_RAM_EXEC_BITMAP_WORDS] = {0};
 
@@ -271,8 +275,13 @@ static inline void exec_pc_table_record(uint32_t pc) {
         uint32_t word = phys >> 2;
         uint32_t mask = 1u << (word & 31u);
         uint32_t *slot = &g_dirty_ram_exec_pc_bitmap[word >> 5];
+#ifdef __vita__
+        if (g_dirty_ram_exec_pc_counts[0] != UINT32_MAX)
+            g_dirty_ram_exec_pc_counts[0]++;
+#else
         if (g_dirty_ram_exec_pc_counts[word] != UINT32_MAX)
             g_dirty_ram_exec_pc_counts[word]++;
+#endif
         if ((*slot & mask) == 0u) {
             *slot |= mask;
             uint32_t page = phys >> 12;
@@ -1162,7 +1171,11 @@ typedef struct {
     uint32_t stk_max_kb; uint64_t cyc_advanced;
 } XSum;
 
+#ifdef __vita__
+#define XDET_CAP 2048u
+#else
 #define XDET_CAP 16384u
+#endif
 #define XSUM_CAP 512u
 static XDetail g_xdet[XDET_CAP];
 static XSum    g_xsum[XSUM_CAP];
@@ -3691,7 +3704,11 @@ int g_ls_observers_armed = 0;
 static uint32_t s_ls_frame_lo = 0, s_ls_frame_hi = 0;   /* hi==0 => disabled */
 
 typedef struct { uint8_t is_write, size; uint32_t addr, val; } ls_op_t;
+#ifdef __vita__
+enum { LS_TRACE_CAP = 4096 };
+#else
 enum { LS_TRACE_CAP = 65536 };
+#endif
 static ls_op_t  s_ls_trace[LS_TRACE_CAP];
 static int      s_ls_trace_n = 0, s_ls_trace_idx = 0;
 static int      s_ls_overflow = 0, s_ls_mismatch = 0;

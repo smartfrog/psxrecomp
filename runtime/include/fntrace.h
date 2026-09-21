@@ -32,7 +32,14 @@ extern "C" {
  * window retrospectives without per-second eviction.
  * Definition uses PSX_BSS so the zeros stay out of the PE image (MinGW+LTO
  * otherwise stuffed this into .rdata and bloated Windows .exe by ~144MiB). */
+#ifdef __vita__
+/* Vita: the module loader reserves .bss memsz at load time and the console has
+ * 512 MB total, so keep 4096 entries (~144 KiB) — a light-debug window that
+ * still wraps through the generic mask path. */
+#define FNTRACE_RING_CAP (1u << 12)
+#else
 #define FNTRACE_RING_CAP (1u << 22)
+#endif
 
 typedef struct {
     uint32_t frame;     /* s_frame_count at dispatch */

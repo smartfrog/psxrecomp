@@ -100,7 +100,12 @@ extern uint32_t g_debug_last_store_pc;
 extern int g_psx_dispatch_depth;
 
 /* Dispatch ring — accessor wrappers exported by debug_server.c. */
+#ifdef __vita__
+/* Vita: must stay equal to debug_server.c's DISPATCH_TRACE_CAP. */
+#define DISPATCH_TRACE_CAP (1 << 10)
+#else
 #define DISPATCH_TRACE_CAP (1 << 16)
+#endif
 extern uint32_t crash_trace_dispatch_ring_get(int idx);
 extern uint64_t crash_trace_dispatch_seq_get(void);
 
@@ -111,7 +116,11 @@ typedef struct {
     uint32_t addr, phys, ra, a0, a1, frame;
     uint32_t last_fn_entry, dispatch_func, last_store_pc;
 } UnknownDispatchEntry;
+#ifdef __vita__
+#define UNKNOWN_DISPATCH_CAP (1 << 10)
+#else
 #define UNKNOWN_DISPATCH_CAP (1 << 16)
+#endif
 extern UnknownDispatchEntry crash_trace_unknown_get(uint64_t seq);
 extern uint64_t crash_trace_unknown_seq_get(void);
 
@@ -368,7 +377,12 @@ static void append_native_stack(char *buf, size_t cap, size_t *pos, uintptr_t st
 
 void psx_crash_trace_dump(const char *reason, void *seh_info) {
     /* Pre-allocate large stack buffer; avoid heap on SEH path. */
+#ifdef __vita__
+    /* Vita: 512 KiB — the crash report still emits, truncated if longer. */
+    static char buf[512 * 1024];
+#else
     static char buf[8 * 1024 * 1024]; /* 8 MB */
+#endif
     size_t pos = 0;
 
     /* Header */
@@ -754,7 +768,11 @@ void psx_crash_trace_dump(const char *reason, void *seh_info) {
      * before the early-flush so it survives a native_stack-walk fault. */
     {
         extern int dirty_ram_xprobe_json(char *out, int cap);
+#ifdef __vita__
+        static char xp[128 * 1024];
+#else
         static char xp[1048576];
+#endif
         int k = dirty_ram_xprobe_json(xp, (int)sizeof(xp));
         if (k > 0) {
             append_str(buf, sizeof(buf), &pos, "  \"xprobe\": ");

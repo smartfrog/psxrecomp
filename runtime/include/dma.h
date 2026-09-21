@@ -81,15 +81,26 @@ typedef struct DMATraceEntry {
     uint32_t pc;
 } DMATraceEntry;
 
+#ifdef __vita__
+/* Vita: module-loader .bss budget (see fntrace.h). */
+#define DMA_TRACE_CAP 1024
+#define DMA_CDROM_HISTORY_CAP 512
+#else
 #define DMA_TRACE_CAP (1 << 14)
 #define DMA_CDROM_HISTORY_CAP (1 << 13)
+#endif
 #define DMA_CDROM_HISTORY_WORDS 16
 
 /* Read-only ordering-table census. Each linked-list execution records the
  * exact head and every node before the node's GP0 words are submitted. The
  * GPU ring supplies the command payloads keyed by their source addresses. */
+#ifdef __vita__
+#define DMA_OT_TRACE_LIST_CAP (1u << 9)
+#define DMA_OT_TRACE_NODE_CAP (1u << 11)
+#else
 #define DMA_OT_TRACE_LIST_CAP (1u << 12)
 #define DMA_OT_TRACE_NODE_CAP (1u << 17)
+#endif
 
 typedef enum DMAOtTraceMode {
     DMA_OT_TRACE_ORIGINAL = 0,

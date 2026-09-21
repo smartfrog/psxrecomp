@@ -131,7 +131,14 @@ typedef struct {
 #ifdef PSX_OVERLAY_TEST_CANDIDATE_CAP
 #define CAND_CAP   PSX_OVERLAY_TEST_CANDIDATE_CAP
 #else
+#ifdef __vita__
+/* Vita: runtime-loaded overlay .so files and their cache directory do not
+ * exist on the console (overlays are linked in statically), so the candidate
+ * registry is never populated; keep it small but nonzero. */
+#define CAND_CAP   1024
+#else
 #define CAND_CAP   PSX_OVERLAY_CANDIDATE_CAP
+#endif
 #endif
 static Candidate s_cand[CAND_CAP];
 static int       s_cand_n = 0;
@@ -152,7 +159,11 @@ static int       s_range_index_overflow = 0;
 /* Cache the selected owner of hot CPS continuation PCs. The cached candidate
  * is still generation/CRC validated on every lookup; this only avoids walking
  * hundreds of historical, currently-invalid owners in a reused region. */
+#ifdef __vita__
+#define RANGE_PC_CACHE_CAP 4096u
+#else
 #define RANGE_PC_CACHE_CAP 16384u
+#endif
 #define RANGE_PC_CACHE_MASK (RANGE_PC_CACHE_CAP - 1u)
 typedef struct { uint32_t phys, generation; int cand; } RangePcCache;
 static RangePcCache s_range_pc_cache[RANGE_PC_CACHE_CAP];
@@ -301,7 +312,11 @@ static void active_stack_pop(int pushed) {
  * interest — never "arm a trace then hope". s_native_inprogress holds the entry
  * currently executing (nonzero at dump => a native fn was entered and never
  * returned: a freeze INSIDE native code, the strongest single suspect). */
+#ifdef __vita__
+#define NRING_CAP 1024
+#else
 #define NRING_CAP 16384
+#endif
 typedef struct { uint32_t addr; uint32_t crc; uint32_t frame; uint64_t seq; int returned; } NRingEnt;
 static NRingEnt s_nring[NRING_CAP];
 static uint32_t s_nring_pos = 0;
@@ -1308,7 +1323,11 @@ static int ranges_delay_slots_hashed(const uint32_t *lo_list,
  * pointers, and cycle-flush callback remain the sole owners for process life;
  * a later identical physical cache pair is preflighted, closed, and recorded
  * as a satisfied path without consuming Candidate slots. */
+#ifdef __vita__
+#define LOADED_PAIR_CAP 512
+#else
 #define LOADED_PAIR_CAP 4096
+#endif
 #define LOAD_PAIR_ALIAS (-1)
 typedef struct {
     uint64_t pair_id;
@@ -1509,7 +1528,11 @@ const char *overlay_loader_last_msg(void) { return s_last_msg; }
  * TRUNCATED SILENTLY — every entry past the cap was invisible to the loader
  * (region ran interpreted forever, no diagnostic). Found by the ABI-sweep
  * negative test. scan_one_cache_dir now shouts if even 4096 is hit. */
+#ifdef __vita__
+#define CACHE_IDX_CAP 512
+#else
 #define CACHE_IDX_CAP 4096
+#endif
 enum {
     CACHE_TIER_UNKNOWN = 0,
     CACHE_TIER_TCC = 1,
@@ -1852,7 +1875,11 @@ static int       s_lazy_range_link_n = 0;
  * branch into the interpreter. The entry is valid only for the current RAM
  * code generation and loader generation: executable writes, DLL publication,
  * and cache rescans all make old misses disappear immediately. */
+#ifdef __vita__
+#define LAZY_MISS_CACHE_CAP 4096u
+#else
 #define LAZY_MISS_CACHE_CAP 16384u
+#endif
 #define LAZY_MISS_CACHE_MASK (LAZY_MISS_CACHE_CAP - 1u)
 typedef struct {
     uint32_t phys;
@@ -3487,7 +3514,11 @@ void overlay_loader_rescan(void) {
 /* The warmed vault and runtime-discovered variants can exceed the old 512-DLL
  * ceiling; once dll_already_loaded() lost track, a rescan could double-register
  * candidates. Match the cache-index capacity used by the loader. */
+#ifdef __vita__
+#define MAX_LOADED_DLLS 256
+#else
 #define MAX_LOADED_DLLS 4096
+#endif
 static char s_loaded_paths[MAX_LOADED_DLLS][768];
 static int  s_nloaded_paths = 0;
 
@@ -4736,7 +4767,11 @@ typedef struct {
     uint32_t in_regs[34];    /* r0..r31, hi, lo at entry                       */
     uint32_t out_regs[34];   /* r0..r31, hi, lo at exit                        */
 } FpEnt;
+#ifdef __vita__
+#define FP_CAP (1u << 10)
+#else
 #define FP_CAP (1u << 16)   /* ~19 MB with full reg files; ~65K executions     */
+#endif
 static FpEnt    s_fp[FP_CAP];
 static uint64_t s_fp_seq = 0;
 

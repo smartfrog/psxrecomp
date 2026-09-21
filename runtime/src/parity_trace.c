@@ -5,9 +5,14 @@
 #include "psx_bss.h"
 #include <string.h>
 
+#ifdef __vita__
+/* Vita: 2048 entries — the module loader reserves .bss memsz up front. */
+#define PARITY_RING_CAP 2048u
+#else
 #define PARITY_RING_CAP 131072u  /* power of two; ~128K thread1 events of history
                                   * so the parked-thread1 divergence is in-window,
                                   * not just the wedge tail (~7.5 MB ring). */
+#endif
 
 static PSX_BSS ParityEntry s_ring[PARITY_RING_CAP];
 static uint64_t    s_seq      = 0;

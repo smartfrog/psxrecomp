@@ -14,10 +14,20 @@
 #include <string.h>
 
 /* 2^22 frames @ 44100 ~= 95 s per tap. Power of two so wrap is a mask. */
+#ifdef __vita__
+/* Vita: 8192 frames (~0.19 s per tap) — the .bss reservation is what has to
+ * fit the module loader's budget, and the wrap path is a plain mask. */
+#define PCM_RING_FRAMES (1u << 13)
+#else
 #define PCM_RING_FRAMES (1u << 22)
+#endif
 #define PCM_RING_MASK   (PCM_RING_FRAMES - 1u)
 
+#ifdef __vita__
+#define EV_RING_CAP  (1u << 10)
+#else
 #define EV_RING_CAP  (1u << 19)
+#endif
 #define EV_RING_MASK (EV_RING_CAP - 1u)
 
 /* Audibility threshold shared with snesrecomp's dropped_audible metric:

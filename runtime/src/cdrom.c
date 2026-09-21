@@ -221,7 +221,11 @@ static int read_delay;
  * One record per physical sector deadline. It separates drive scheduling
  * lateness (buffer_cycle - due_cycle) from guest/controller backpressure
  * (IRQ arm/presentation after the buffer already exists). */
+#ifdef __vita__
+#define CD_TIMING_CAP 512u
+#else
 #define CD_TIMING_CAP 4096u
+#endif
 #define CDT_DATA      0x01u
 #define CDT_DMA       0x02u
 #define CDT_PENDED    0x04u

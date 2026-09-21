@@ -11,7 +11,14 @@
 extern "C" {
 #endif
 
+#ifdef __vita__
+/* Vita: the semantic workload feeds only gpu_gl_renderer.c, which has no GL
+ * context on the Vita build (the renderer is stubbed), so the reservation is
+ * sized for the module loader's .bss budget rather than for workload depth. */
+#define GPU_SEMANTIC_WORKLOAD_CAPACITY 128u
+#else
 #define GPU_SEMANTIC_WORKLOAD_CAPACITY 4096u
+#endif
 #define GPU_SEMANTIC_INTERPOLATION_MAX_PHASES 7u
 
 typedef enum GpuSemanticWorkloadStatus {
