@@ -1071,7 +1071,15 @@ static void psx_atexit_handler(void) {
 
 void psx_crash_trace_install_handlers(void) {
 #ifndef _WIN32
+#ifdef __vita__
+    /* Vita: do NOT take SIGSEGV away from the platform. Guest code runs as
+     * JIT'd host code, so a guest fault arrives as a host fault in native
+     * (HLE) code; a guest-side handler can never run for it, and replacing
+     * the emulator's handler only hides the real faulting PC from the
+     * emulator's crash reporting. Soft-exit signals below stay installed. */
+#else
     signal(SIGSEGV, psx_signal_handler);
+#endif
 #endif
     /* Soft-exit on all hosts (incl. MinGW): MSYS2 kill -TERM must flush PGO. */
     signal(SIGINT, psx_soft_exit_handler);

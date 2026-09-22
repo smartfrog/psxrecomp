@@ -219,6 +219,19 @@ static bool native_source_writer_observer(
  * cards, disc image). Desktop paths are untouched by these. */
 static const char kPsxVitaAppDir[]  = "app0:/";
 static const char kPsxVitaUserDir[] = "ux0:/data/xenogears-recomp";
+
+/* Coarse boot-phase timestamps for the hardware performance pass. Each line
+ * carries wall-clock time so a report can be compared against launch time;
+ * stderr is the runtime.log redirect installed at the top of main(). */
+static void xg_vita_phase(const char* what) {
+    struct timeval tv;
+    gettimeofday(&tv, nullptr);
+    std::fprintf(stderr, "[xg-phase] %ld.%03ld %s\n",
+                 (long)tv.tv_sec, (long)(tv.tv_usec / 1000), what);
+    std::fflush(stderr);
+}
+#else
+static inline void xg_vita_phase(const char*) {}
 #endif
 #ifndef PSX_DEFAULT_GAME_CONFIG_PATH
 #define PSX_DEFAULT_GAME_CONFIG_PATH ""
@@ -8963,6 +8976,13 @@ static NetplayVblankEpilogue sdl_vblank_present_body(void) {
 
 static void sdl_vblank_frontend_epilogue(void) {
     NetplayVblankEpilogue ep = sdl_vblank_present_body();
+    {
+        static bool s_first_present_logged = false;
+        if (!s_first_present_logged) {
+            s_first_present_logged = true;
+            xg_vita_phase("first frame presented");
+        }
+    }
     /* Selfcheck span-end rewind: after present-body C++ RAII, before any
      * further guest progress. Longjmps on success — keeps every resim load
      * on the same VBlank boundary (BB fast-poll tails forked #2 vs #3). */
@@ -13723,6 +13743,19 @@ namespace {
 #endif
 
 int main(int argc, char** argv) {
+    /* Vita: the package (app0:) is read-only and the emulator swallows guest
+     * stderr, so mirror every runtime diagnostic into the writable user
+     * directory. Append: a boot that dies mid-way must not erase the tail of
+     * the previous run. Failure to redirect is non-fatal (desktop behaviour). */
+#ifdef __vita__
+    {
+        static const char kPsxVitaLogPath[] =
+            "ux0:/data/xenogears-recomp/runtime.log";
+        if (std::freopen(kPsxVitaLogPath, "a", stderr))
+            std::setvbuf(stderr, nullptr, _IOLBF, BUFSIZ);
+    }
+#endif
+
     /* Force line-buffered output so messages appear even if killed.
      * MSVC's UCRT invalid-parameter validation fast-fails setvbuf() when
      * size==0 is paired with a buffering mode other than _IONBF (glibc/MinGW
@@ -13734,6 +13767,7 @@ int main(int argc, char** argv) {
     std::setvbuf(stderr, nullptr, _IOLBF, BUFSIZ);
     std::fprintf(stderr, "psxrecomp: main() entered\n");
     std::fflush(stderr);
+    xg_vita_phase("module init start");
 #if defined(RECOMP_LAUNCHER)
     launcher_boot_timing_mark("host:main_enter");
 #endif
@@ -14870,6 +14904,7 @@ int main(int argc, char** argv) {
 #if defined(RECOMP_LAUNCHER)
     launcher_boot_timing_mark("host:game_config_done");
 #endif
+    xg_vita_phase("game config done");
 
     if (!game_name.empty()) s_picker_game_name = game_name;
 
@@ -15260,6 +15295,7 @@ int main(int argc, char** argv) {
 #if defined(RECOMP_LAUNCHER)
     launcher_boot_timing_mark("host:pre_overlay_worker");
 #endif
+    xg_vita_phase("overlay worker start");
     /* Overlay cache: run ABI preflight / resident DLL loads on a worker so the
      * launcher can open immediately and init overlaps with UI time. Join before
      * guest boot. When the launcher is skipped, the join still runs below. */
@@ -16951,6 +16987,7 @@ session_reboot:
             return 1;
         }
     }
+    xg_vita_phase("sdl video init done");
     if (input_replay::active()) {
         set_default_controller_mapping();
     } else {
@@ -17013,6 +17050,7 @@ session_reboot:
         }
     }
 #endif
+    xg_vita_phase("sdl audio init done");
 
     Uint32 win_flags = SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE;
 #ifdef __vita__
@@ -17711,7 +17749,13 @@ session_reboot:
     psx_selfcheck_init(&cpu, memory_get_bios_checksum(), game_entry_pc);
 
     /* Execute. */
+    xg_vita_phase("module init end");
     std::fprintf(stdout, "psxrecomp runtime: executing from PC=0x%08X\n", cpu.pc);
+    {
+        char phase[96];
+        std::snprintf(phase, sizeof(phase), "bios handoff pc=0x%08X", cpu.pc);
+        xg_vita_phase(phase);
+    }
 
 #if defined(PSX_ORACLE_BUILD)
     std::fprintf(stdout, "psxrecomp ORACLE: interpreter mode (port %d)\n", DEFAULT_DEBUG_PORT);
