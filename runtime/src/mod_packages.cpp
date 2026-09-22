@@ -301,7 +301,7 @@ bool verify_file(const fs::path& path, uint64_t expected_size,
     }
     psx_sha256_ctx hash;
     psx_sha256_init(&hash);
-    std::array<uint8_t, 1024 * 1024> bytes{};
+    std::array<uint8_t, 64 * 1024> bytes{};
     uint64_t size = 0;
     while (in) {
         in.read(reinterpret_cast<char*>(bytes.data()), bytes.size());
