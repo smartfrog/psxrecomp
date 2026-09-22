@@ -1684,6 +1684,22 @@ bool strip_developer_features(ModPackage& package) {
 
 } // namespace
 
+bool ModPackageManager::requires_disc_digest() const {
+    for (const auto& [id, versions] : packages_) {
+        (void)id;
+        for (const auto& [version, package] : versions) {
+            (void)version;
+            for (const ModTarget& target : package.targets)
+                if (!target.disc_sha256.empty()) return true;
+            for (const ModPatch& patch : package.patches)
+                if (!patch.disc_sha256.empty()) return true;
+            for (const ModIndexedFile& file : package.indexed_files)
+                if (!file.disc_sha256.empty()) return true;
+        }
+    }
+    return false;
+}
+
 ModPackageManager::ModPackageManager(fs::path mods_root) : root_(std::move(mods_root)) {}
 
 void ModPackageManager::set_root(fs::path mods_root) {

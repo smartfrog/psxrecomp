@@ -214,6 +214,8 @@ static bool native_source_writer_observer(
 #define PSX_BUNDLED_BIOS_PATH "bios/openbios.bin"
 #endif
 #ifdef __vita__
+#include <psp2/power.h>
+
 /* Vita filesystem layout. app0: is the read-only package the VPK installed;
  * ux0:/data/<title> is the writable user directory (settings, mods, memory
  * cards, disc image). Desktop paths are untouched by these. */
@@ -230,8 +232,72 @@ static void xg_vita_phase(const char* what) {
                  (long)tv.tv_sec, (long)(tv.tv_usec / 1000), what);
     std::fflush(stderr);
 }
+
+static uint64_t xg_vita_now_us(void) {
+    struct timeval tv;
+    gettimeofday(&tv, nullptr);
+    return (uint64_t)tv.tv_sec * 1000000u + (uint64_t)tv.tv_usec;
+}
+
+/* Read-only clock telemetry: the operator raises clocks manually and this
+ * records what the system actually granted. No setter is ever called. */
+static void xg_vita_log_clocks(void) {
+    char line[128];
+    std::snprintf(line, sizeof(line),
+                  "clocks arm=%d gpu=%d bus=%d gpu_xbar=%d (MHz, read-only)",
+                  scePowerGetArmClockFrequency(), scePowerGetGpuClockFrequency(),
+                  scePowerGetBusClockFrequency(), scePowerGetGpuXbarClockFrequency());
+    xg_vita_phase(line);
+}
+
+/* Time spent inside the per-vblank body (pacing + scanout + present), in us.
+ * The rate marker below reports it per frame so a hardware log separates
+ * emulation throughput from present cost. */
+static uint64_t g_xg_vita_vblank_us = 0;
+
+/* Periodic emulation-rate marker for hardware runs. Answers, for the window
+ * since the previous line: guest vblank rate, guest cycles/second (as a
+ * fraction of PS1 realtime) and the average vblank-body time. Checkpoints are
+ * log-spaced so a slow boot still yields early data without flooding the log. */
+extern "C" uint64_t s_frame_count;
+extern "C" uint64_t g_dirty_ram_insns_run;
+static void xg_vita_rate_marker(void) {
+    static uint64_t prev_us = 0, prev_frame = 0, prev_cycle = 0, prev_vblank_us = 0;
+    static uint64_t prev_dirty = 0;
+    static uint64_t next_frame = 30, step = 120;
+    const uint64_t frame = s_frame_count;
+    if (frame < next_frame) return;
+    const uint64_t now_us = xg_vita_now_us();
+    const uint64_t cycle = (uint64_t)psx_get_cycle_count();
+    const uint64_t dirty = g_dirty_ram_insns_run;
+    if (prev_us != 0 && now_us > prev_us) {
+        const double dt = (double)(now_us - prev_us) / 1000000.0;
+        const uint64_t df = frame - prev_frame;
+        const uint64_t dc = cycle - prev_cycle;
+        const double vblank_us = (double)(g_xg_vita_vblank_us - prev_vblank_us);
+        std::fprintf(stderr,
+            "[xg-phase] rate arm=%d MHz frames=+%llu (%.2f Hz) guest=+%llu cyc "
+            "(%.2f MHz, %.1f%% realtime) dirty_interp=%.2f Minsn/s vblank_body=%.2f ms/frame\n",
+            scePowerGetArmClockFrequency(),
+            (unsigned long long)df, (double)df / dt,
+            (unsigned long long)dc, (double)dc / dt / 1e6,
+            100.0 * ((double)dc / dt) / 33868800.0,
+            (double)(dirty - prev_dirty) / dt / 1e6,
+            vblank_us / 1000.0 / (double)df);
+        std::fflush(stderr);
+    }
+    prev_us = now_us;
+    prev_frame = frame;
+    prev_cycle = cycle;
+    prev_dirty = dirty;
+    prev_vblank_us = g_xg_vita_vblank_us;
+    next_frame = frame + step;
+    if (step < 30720) step *= 4;
+}
 #else
 static inline void xg_vita_phase(const char*) {}
+static inline void xg_vita_log_clocks(void) {}
+static inline void xg_vita_rate_marker(void) {}
 #endif
 #ifndef PSX_DEFAULT_GAME_CONFIG_PATH
 #define PSX_DEFAULT_GAME_CONFIG_PATH ""
@@ -8975,7 +9041,13 @@ static NetplayVblankEpilogue sdl_vblank_present_body(void) {
 }
 
 static void sdl_vblank_frontend_epilogue(void) {
+#ifdef __vita__
+    const uint64_t xg_vblank_t0 = xg_vita_now_us();
+#endif
     NetplayVblankEpilogue ep = sdl_vblank_present_body();
+#ifdef __vita__
+    g_xg_vita_vblank_us += xg_vita_now_us() - xg_vblank_t0;
+#endif
     {
         static bool s_first_present_logged = false;
         if (!s_first_present_logged) {
@@ -8983,6 +9055,9 @@ static void sdl_vblank_frontend_epilogue(void) {
             xg_vita_phase("first frame presented");
         }
     }
+#ifdef __vita__
+    xg_vita_rate_marker();
+#endif
     /* Selfcheck span-end rewind: after present-body C++ RAII, before any
      * further guest progress. Longjmps on success — keeps every resim load
      * on the same VBlank boundary (BB fast-poll tails forked #2 vs #3). */
@@ -13751,8 +13826,27 @@ int main(int argc, char** argv) {
     {
         static const char kPsxVitaLogPath[] =
             "ux0:/data/xenogears-recomp/runtime.log";
-        if (std::freopen(kPsxVitaLogPath, "a", stderr))
-            std::setvbuf(stderr, nullptr, _IOLBF, BUFSIZ);
+        /* First run: the writable directory does not exist yet, so freopen
+         * would fail and every boot diagnostic (including the [xg-phase]
+         * markers from this very boot) would be lost. Create it first. */
+        std::error_code log_dir_ec;
+        std::filesystem::create_directories(kPsxVitaUserDir, log_dir_ec);
+        /* Probe before freopen: newlib returns the stderr FILE slot to the
+         * stdio pool when freopen fails, so a later diagnostic could land in
+         * an unrelated stream. If the log cannot be opened at all (card full,
+         * filesystem error) we keep the original stderr and lose diagnostics
+         * instead of corrupting stdio state. */
+        FILE* log_probe = std::fopen(kPsxVitaLogPath, "a");
+        if (log_probe) {
+            std::fclose(log_probe);
+            if (std::freopen(kPsxVitaLogPath, "a", stderr))
+                std::setvbuf(stderr, nullptr, _IOLBF, BUFSIZ);
+            /* stdout carries the guard/interpreter/cadence diagnostics; the
+             * emulator and the hardware both discard it otherwise. */
+            if (std::freopen(kPsxVitaLogPath, "a", stdout))
+                std::setvbuf(stdout, nullptr, _IOLBF, BUFSIZ);
+        }
+        xg_vita_log_clocks();
     }
 #endif
 
@@ -16397,6 +16491,7 @@ int main(int argc, char** argv) {
             }
         }
     }
+    xg_vita_phase("overlay worker joined");
 
     if (game_config_path || disc_override_path || !resolved_disc.empty()) {
         resolved_disc = resolve_disc_for_runtime(
@@ -16406,6 +16501,7 @@ int main(int argc, char** argv) {
             return 1;
         }
     }
+    xg_vita_phase("disc resolved");
 
     {
         /* Netplay must stay vanilla: launcher commit_netplay clears the plan,
@@ -16425,6 +16521,7 @@ int main(int argc, char** argv) {
             return 1;
         }
     }
+    xg_vita_phase("mods committed");
     /* Activation callbacks are re-run after every launcher session. Clear
      * game-owned controller overrides/policies first so disabling a package
      * cannot leave its prior state latched across a soft return. */
@@ -16507,6 +16604,7 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "psxrecomp: no BIOS selected; exiting.\n");
         return 1;
     }
+    xg_vita_phase("bios resolved");
     /* memcard_dir was resolved to its default before the launcher (above). */
 
     std::string bios_path_str    = resolved_bios.string();
@@ -16861,11 +16959,13 @@ session_reboot:
             std::fprintf(stdout, "psxrecomp: disc region %s (serial %s)\n",
                          ident.region.c_str(), ident.detected_serial.c_str());
     }
+    xg_vita_phase("disc identity done");
     /* Arm the text-image guard now that both possible sources are resolved:
      * the local EXE file (dev checkouts) and the disc image (every install). */
     if (game_config_path)
         arm_text_image_guard(text_guard_exe_path, text_guard_load_addr,
                              disc_path_str);
+    xg_vita_phase("text guard done");
     /* Executable/overlay patches from enabled mods, applied once the guard is
      * armed so a patched image is never mistaken for a divergent one. */
     mod_runtime_enable_disc_patches();
@@ -16897,6 +16997,7 @@ session_reboot:
         };
         memcard_init_slots(memcard_dir_str.c_str(), slots);
     }
+    xg_vita_phase("memcards done");
     (void)ram_provenance_init(memory_get_ram_size());
     guest_render_native_stream_set_source_writer_observer(
         native_source_writer_observer);
@@ -16921,6 +17022,7 @@ session_reboot:
         (void)debug_port;
 #endif
     }
+    xg_vita_phase("debug services done");
     /* Register game entry_pc for post-BIOS disc speed switch. Fires once when
      * the BIOS hands control to the game EXE — not on the BIOS shell. */
     if (game_entry_pc != 0)
@@ -16943,6 +17045,7 @@ session_reboot:
     std::fprintf(stdout, "psxrecomp: headless frontend enabled\n");
   } else {
     /* ---- SDL init ---- */
+    xg_vita_phase("sdl init start");
     /* Scale quality governs SDL's logical-size -> window scaling. Linear when
      * antialiasing is on so the (super)sampled frame stays smooth when the
      * window is resized; nearest preserves crisp pixels otherwise. */
@@ -16982,10 +17085,19 @@ session_reboot:
 #ifdef SDL_HINT_WINDOWS_DPI_SCALING
     SDL_SetHint(SDL_HINT_WINDOWS_DPI_SCALING, "0");
 #endif
-        if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0) {
+        if (SDL_Init(SDL_INIT_VIDEO) != 0) {
             std::fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
             return 1;
         }
+        /* Split from VIDEO so a hardware log can attribute the cost to the
+         * video driver vs. HID/gamecontroller enumeration. */
+        xg_vita_phase("sdl video subsystem done");
+        if (SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER) != 0) {
+            std::fprintf(stderr, "SDL_Init gamecontroller failed: %s\n",
+                         SDL_GetError());
+            return 1;
+        }
+        xg_vita_phase("sdl gamecontroller done");
     }
     xg_vita_phase("sdl video init done");
     if (input_replay::active()) {
@@ -17088,6 +17200,7 @@ session_reboot:
         return 1;
     }
     psx_apply_window_icon(sdl_window, argv[0]);
+    xg_vita_phase("window created");
 
     /* Resolve Native before host refresh and GL setup. Its guest clock must
      * never inherit monitor timing or start the legacy interpolation thread. */
@@ -17403,6 +17516,7 @@ session_reboot:
         g_logical_w = 480 * g_video_aspect_num * tex_scale / g_video_aspect_den;
         SDL_RenderSetLogicalSize(sdl_renderer, g_logical_w, 480 * tex_scale);
     }
+    xg_vita_phase("renderer created");
   }
 
     /* Staging buffer + backing texture preserve the 576-row interlaced PAL
@@ -17434,6 +17548,7 @@ session_reboot:
     SDL_SetTextureScaleMode(sdl_texture,
                             g_video_aa ? SDL_ScaleModeLinear : SDL_ScaleModeNearest);
   }
+    xg_vita_phase("present texture created");
     log_present_cadence();
   }
 

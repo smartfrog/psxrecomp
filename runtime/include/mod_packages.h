@@ -469,6 +469,12 @@ public:
                           const std::string& exe_sha256 = {},
                           const std::string& disc_sha256 = {}) const;
 
+    /* True when any installed or bundled package gates on the disc image
+     * digest (a target, patch, or indexed-file disc_sha256). When this is
+     * false the digest is unused by resolve() and can be skipped entirely
+     * instead of hashing a multi-hundred-MB disc image at every boot. */
+    bool requires_disc_digest() const;
+
     static bool read_manifest(const std::filesystem::path& path, ModPackage& out,
                               std::string* error = nullptr);
 

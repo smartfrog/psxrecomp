@@ -374,7 +374,8 @@ bool sha256_open_disc(PS1::ISOReader& disc, std::string& out,
 bool open_verified_disc(const std::filesystem::path& path,
                         DiscPathResolution& resolved,
                         std::unique_ptr<PS1::ISOReader>& reader,
-                        std::string& digest, std::string* error) {
+                        std::string& digest, std::string* error,
+                        bool compute_digest = true) {
     digest.clear();
     reader.reset();
     resolved = resolve_disc_path(path);
@@ -389,7 +390,9 @@ bool open_verified_disc(const std::filesystem::path& path,
         reader.reset();
         return false;
     }
-    if (!sha256_open_disc(*reader, digest, error)) {
+    /* Hashing walks every raw sector of the image (hundreds of MB). Only the
+     * callers that actually consume the digest pay for it. */
+    if (compute_digest && !sha256_open_disc(*reader, digest, error)) {
         reader.reset();
         return false;
     }
@@ -1383,8 +1386,16 @@ bool mod_runtime_commit(const std::filesystem::path& disc_path,
     std::unique_ptr<PS1::ISOReader> verified_reader;
     std::string digest;
     std::string commit_error;
+    /* The digest only feeds mod resolution and the verified-disc overlay
+     * checkout. Hashing the whole image (hundreds of MB) at every boot when no
+     * package can gate on it is pure boot latency, so check first. */
+    const bool need_disc_digest = s.manager.requires_disc_digest();
+    if (!need_disc_digest)
+        std::fprintf(stdout,
+                     "psxrecomp: disc digest skipped (no mod gates on it)\n");
     if (!open_verified_disc(
-            disc_path, resolved, verified_reader, digest, &commit_error)) {
+            disc_path, resolved, verified_reader, digest, &commit_error,
+            need_disc_digest)) {
         s.error = commit_error;
         if (error) *error = commit_error;
         return false;
