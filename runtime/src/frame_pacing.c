@@ -82,9 +82,29 @@ static void frame_pacer_wait_internal(FramePacer *p, double period_ms,
         /* Waitable timer on Win32; usleep on Unix — not coarse Sleep/SDL_Delay. */
         psx_host_sleep_ms(ms);
     }
+#ifdef __vita__
+    /* Vita shares its cores with the system, so the sub-2ms tail must not be
+     * spun on: that burns a core on every paced frame and starves the OS (the
+     * PSVshell overlay could not even open while the app ran). Yield in
+     * <=500us slices instead; on Vita psx_host_sleep_micros() is newlib
+     * nanosleep -> sceKernelDelayThread, a real block. The loop re-reads the
+     * clock every pass and exits at the deadline or when no time is left, so
+     * it cannot livelock, and a slice can only overshoot by the kernel's sleep
+     * granularity — late, never early. next_deadline == 0 returned above, so
+     * the first frame is never delayed by this path. */
+    for (;;) {
+        now = SDL_GetPerformanceCounter();     /* ONE read per decision */
+        if (now >= p->next_deadline) break;
+        const uint64_t left_us = freq
+            ? ((p->next_deadline - now) * 1000000u) / freq : 0u;
+        if (left_us == 0u) break;              /* sub-microsecond remainder */
+        psx_host_sleep_micros(left_us > 500u ? 500u : (unsigned)left_us);
+    }
+#else
     while (SDL_GetPerformanceCounter() < p->next_deadline) {
         /* final sub-ms spin */
     }
+#endif
     p->next_deadline += period;
 }
 
