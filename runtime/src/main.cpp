@@ -17751,11 +17751,13 @@ session_reboot:
     /* Execute. */
     xg_vita_phase("module init end");
     std::fprintf(stdout, "psxrecomp runtime: executing from PC=0x%08X\n", cpu.pc);
+#ifdef __vita__
     {
         char phase[96];
         std::snprintf(phase, sizeof(phase), "bios handoff pc=0x%08X", cpu.pc);
         xg_vita_phase(phase);
     }
+#endif
 
 #if defined(PSX_ORACLE_BUILD)
     std::fprintf(stdout, "psxrecomp ORACLE: interpreter mode (port %d)\n", DEFAULT_DEBUG_PORT);
