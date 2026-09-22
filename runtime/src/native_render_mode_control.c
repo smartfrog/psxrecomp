@@ -13,10 +13,19 @@ GuestRenderRenderMode native_render_mode_parse(const char *value) {
 GuestRenderRenderMode native_render_mode_resolve(const char *config_value,
                                                  const char *environment_value,
                                                  const char *cli_value) {
+#ifdef __vita__
+    /* The Vita build links no native renderer (XG_RENDER_NATIVE=OFF); a
+     * game.toml default of "native" must not fail-close the boot. */
+    (void)config_value;
+    (void)environment_value;
+    (void)cli_value;
+    return GUEST_RENDER_RENDER_ORIGINAL;
+#else
     if (cli_value != NULL) return native_render_mode_parse(cli_value);
     if (environment_value != NULL)
         return native_render_mode_parse(environment_value);
     return native_render_mode_parse(config_value);
+#endif
 }
 
 const char *native_render_mode_name(GuestRenderRenderMode mode) {

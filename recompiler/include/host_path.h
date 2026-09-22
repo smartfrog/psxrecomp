@@ -16,6 +16,15 @@ inline bool host_path_is_absolute(const std::filesystem::path& path) {
     if (s.size() > 2 && separator(s[0]) && separator(s[1]) && !separator(s[2]))
         return true;
 #endif
+#ifdef __vita__
+    // Vita device paths (app0:/..., ux0:/...) are fully qualified: POSIX
+    // std::filesystem sees no root and would anchor them on the cwd.
+    const auto& s = path.native();
+    const std::string::size_type colon = s.find(':');
+    if (colon != std::string::npos && colon > 0 && colon + 1 < s.size() &&
+        s[colon + 1] == '/')
+        return true;
+#endif
     return path.is_absolute();
 }
 

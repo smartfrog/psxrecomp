@@ -213,6 +213,13 @@ static bool native_source_writer_observer(
 #ifndef PSX_BUNDLED_BIOS_PATH
 #define PSX_BUNDLED_BIOS_PATH "bios/openbios.bin"
 #endif
+#ifdef __vita__
+/* Vita filesystem layout. app0: is the read-only package the VPK installed;
+ * ux0:/data/<title> is the writable user directory (settings, mods, memory
+ * cards, disc image). Desktop paths are untouched by these. */
+static const char kPsxVitaAppDir[]  = "app0:/";
+static const char kPsxVitaUserDir[] = "ux0:/data/xenogears-recomp";
+#endif
 #ifndef PSX_DEFAULT_GAME_CONFIG_PATH
 #define PSX_DEFAULT_GAME_CONFIG_PATH ""
 #endif
@@ -2706,6 +2713,12 @@ static std::filesystem::path find_upward(std::filesystem::path start,
 // argv[0] are non-Windows / fallback sources only.
 static std::filesystem::path exe_dir_from_argv(const char* argv0) {
     namespace fs = std::filesystem;
+#ifdef __vita__
+    /* Vita: argv[0] is not a filesystem path; the package mount is the
+     * executable's directory. Writable state lives under kPsxVitaUserDir. */
+    (void)argv0;
+    return fs::path(kPsxVitaAppDir);
+#else
     std::error_code ec;
     fs::path exe_dir;
 #ifdef _WIN32
@@ -2735,6 +2748,7 @@ static std::filesystem::path exe_dir_from_argv(const char* argv0) {
     // we never silently resolve against an unrelated cwd deeper in the tree.
     if (exe_dir.empty()) exe_dir = fs::path(".");
     return exe_dir;
+#endif
 }
 
 static std::filesystem::path resolve_existing_runtime_path(const char* requested,
@@ -3208,6 +3222,23 @@ static std::filesystem::path resolve_disc_for_runtime(const std::filesystem::pat
         return cached;
     }
 
+#ifdef __vita__
+    /* No interactive file picker on Vita: the disc the player copied into the
+     * writable user directory is the only place a first run can find it. */
+    for (const char* name : {"disc1.cue", "disc1.bin"}) {
+        std::filesystem::path candidate =
+            std::filesystem::path(kPsxVitaUserDir) / name;
+        std::error_code vita_ec;
+        if (!std::filesystem::exists(candidate, vita_ec)) continue;
+        candidate = normalize_disc_path_for_launch(candidate);
+        if (validate_disc_for_launch(candidate, game_id)) return candidate;
+    }
+    std::fprintf(stderr,
+        "psxrecomp: no usable disc image in %s\n"
+        "  copy disc1.cue (with its disc1.bin) there, then relaunch.\n",
+        kPsxVitaUserDir);
+    return {};
+#else
     launcher_info((s_picker_game_name + " — game disc image needed").c_str(),
         "Step 2 of 2 — game disc image\n\n"
         "In the next window, select your " + s_picker_game_name +
@@ -3233,6 +3264,7 @@ static std::filesystem::path resolve_disc_for_runtime(const std::filesystem::pat
             return picked;
         }
     }
+#endif
 }
 
 static std::filesystem::path resolve_bios_path(const char* requested, const char* argv0) {
@@ -13951,15 +13983,35 @@ int main(int argc, char** argv) {
     }
     if (cli_evidence_out) s_input_replay_evidence_path = cli_evidence_out;
     std::filesystem::path runtime_state_dir;
+#ifdef __vita__
+    /* Vita has no CLI and the package is read-only: the user directory is the
+     * single writable state root. */
+    runtime_state_dir = std::filesystem::path(kPsxVitaUserDir);
+#else
     if (cli_runtime_state) {
         runtime_state_dir = std::filesystem::path(cli_runtime_state);
         if (runtime_state_dir.is_relative()) runtime_state_dir = exe_dir_from_argv(argv[0]) / runtime_state_dir;
+    }
+#endif
+    if (!runtime_state_dir.empty()) {
         std::error_code state_ec;
         std::filesystem::create_directories(runtime_state_dir, state_ec);
         if (state_ec) {
             std::fprintf(stderr, "psxrecomp: cannot create --runtime-state %s\n", runtime_state_dir.string().c_str());
             return 1;
         }
+#ifdef __vita__
+        for (const char* sub : {"memcards", "mods"}) {
+            std::error_code sub_ec;
+            std::filesystem::create_directories(runtime_state_dir / sub, sub_ec);
+            if (sub_ec) {
+                std::fprintf(stderr, "psxrecomp: cannot create %s: %s\n",
+                             (runtime_state_dir / sub).string().c_str(),
+                             sub_ec.message().c_str());
+                return 1;
+            }
+        }
+#endif
     }
 
     std::string default_game_config_storage;
@@ -15187,13 +15239,18 @@ int main(int argc, char** argv) {
         }
     }
 
-    /* Scan <exe_dir>/mods and load persisted enable/option state. Everything
-     * downstream — the launcher Mods tab (gi.mods), disc patching, the
-     * psx_mod_set_* callbacks — is inert until this runs. */
+    /* Scan <exe_dir>/mods (or <runtime-state>/mods when a state dir is set:
+     * --runtime-state, or the Vita user directory) and load persisted
+     * enable/option state. Everything downstream — the launcher Mods tab
+     * (gi.mods), disc patching, the psx_mod_set_* callbacks — is inert until
+     * this runs. */
     {
+        const std::filesystem::path mods_root = runtime_state_dir.empty()
+            ? exe_dir_from_argv(argv[0]) / "mods"
+            : runtime_state_dir / "mods";
         std::string mod_error;
         if (!PSXRecompV4::mod_runtime_initialize(
-                exe_dir_from_argv(argv[0]) / "mods", game_id,
+                mods_root, game_id,
                 game_entry_pc, text_guard_exe_path, &mod_error)) {
             std::fprintf(stderr, "psxrecomp: mods unavailable: %s\n",
                          mod_error.c_str());
@@ -16958,11 +17015,18 @@ session_reboot:
 #endif
 
     Uint32 win_flags = SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE;
+#ifdef __vita__
+    /* Vita SDL2 exposes no OpenGL/Vulkan video driver: requesting either flag
+     * makes SDL_CreateWindow fail outright. Software present is the only
+     * backend on this platform (Phase 2 owns a real GL/vitaGL path). */
+    g_video_renderer = 0;
+#else
     if (g_video_renderer == 1) {
         configure_core_gl_context_attributes();
         win_flags |= SDL_WINDOW_OPENGL;
     }
     if (g_video_renderer == 2) win_flags |= SDL_WINDOW_VULKAN;
+#endif
     /* Fullscreen on launch (launcher's tri-state Fullscreen control): 1 =
      * borderless desktop fullscreen (keeps the desktop resolution, letterboxes
      * the image), 2 = exclusive fullscreen (real display-mode change), 0 =

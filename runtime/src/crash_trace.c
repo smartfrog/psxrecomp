@@ -48,7 +48,14 @@
                             * (interpreter-only) run into its own report */
 
 /* Output path — overwritten per dump. */
+#ifdef __vita__
+/* The Vita package (cwd) is read-only; the report must land where it can be
+ * read back after a crashed boot. */
+static const char *kReportPath =
+    "ux0:/data/xenogears-recomp/psx_last_run_report.json";
+#else
 static const char *kReportPath = "psx_last_run_report.json";
+#endif
 
 /* Build identity, embedded into every report so a user-submitted crash can be
  * correlated to an exact build (issue #1 reports had no version field). The git
