@@ -257,8 +257,13 @@ static uint64_t g_xg_vita_vblank_us = 0;
 
 /* Periodic emulation-rate marker for hardware runs. Answers, for the window
  * since the previous line: guest vblank rate, guest cycles/second (as a
- * fraction of PS1 realtime) and the average vblank-body time. Checkpoints are
- * log-spaced so a slow boot still yields early data without flooding the log. */
+ * fraction of PS1 realtime), the average vblank-body time, and the per-helper
+ * call rates (blocks/svc/irq/icache) that attribute the host cycles each guest
+ * instruction costs. Checkpoints are log-spaced (frames 31, 151, 631, 2551, ...)
+ * so a slow boot still yields early data without flooding the log; the early
+ * lines are the BIOS boot, where `blocks` reads 0 because the recompiled BIOS
+ * backend carries no psx_slice_block guard — the first lines that can show
+ * game/overlay blocks are the ones past the EXE handoff. */
 extern "C" uint64_t s_frame_count;
 extern "C" uint64_t g_dirty_ram_insns_run;
 #ifdef __vita__
@@ -272,48 +277,48 @@ extern unsigned long long g_xg_vita_icache_fetches;
 static void xg_vita_rate_marker(void) {
     static uint64_t prev_us = 0, prev_frame = 0, prev_cycle = 0, prev_vblank_us = 0;
     static uint64_t prev_dirty = 0;
-#ifdef __vita__
     static uint64_t prev_blocks = 0, prev_svc = 0, prev_irq = 0, prev_ifetch = 0;
-#endif
-    static uint64_t next_frame = 30, step = 120;
+    static uint64_t next_frame = 1, step = 30;
     const uint64_t frame = s_frame_count;
     if (frame < next_frame) return;
     const uint64_t now_us = xg_vita_now_us();
     const uint64_t cycle = (uint64_t)psx_get_cycle_count();
     const uint64_t dirty = g_dirty_ram_insns_run;
     if (prev_us != 0 && now_us > prev_us) {
-        const double dt = (double)(now_us - prev_us) / 1000000.0;
+        const uint64_t dus = now_us - prev_us;
+        const double dt = (double)dus / 1000000.0;
         const uint64_t df = frame - prev_frame;
         const uint64_t dc = cycle - prev_cycle;
         const double vblank_us = (double)(g_xg_vita_vblank_us - prev_vblank_us);
+        /* Helper-call rates, integer-only: `calls` prints in the same line as
+         * `rate` (one write per window) and never converts a double to
+         * unsigned long long, the one operation this path would otherwise
+         * introduce. blocks/s counts every basic block the generated code
+         * enters: the increment lives in the cpu_state.h psx_slice_block
+         * wrapper (the one call each block leader makes), not in
+         * psx_slice_block_impl, which the parked precise-slice default never
+         * reaches. Host cycles per guest instruction is then (arm MHz) /
+         * (blocks/s * mean instructions per block). */
+        const uint64_t blocks_s = (g_xg_vita_blocks_run - prev_blocks) * 1000000ull / dus;
+        const uint64_t svc_s = (g_xg_vita_svc_calls - prev_svc) * 1000000ull / dus;
+        const uint64_t irq_s = (g_xg_vita_irq_checks - prev_irq) * 1000000ull / dus;
+        const uint64_t icache_s = (g_xg_vita_icache_fetches - prev_ifetch) * 1000000ull / dus;
         std::fprintf(stderr,
             "[xg-phase] rate arm=%d MHz frames=+%llu (%.2f Hz) guest=+%llu cyc "
-            "(%.2f MHz, %.1f%% realtime) dirty_interp=%.2f Minsn/s vblank_body=%.2f ms/frame\n",
+            "(%.2f MHz, %.1f%% realtime) dirty_interp=%.2f Minsn/s vblank_body=%.2f ms/frame "
+            "calls blocks=+%llu/s svc=+%llu/s irq=+%llu/s icache=+%llu/s\n",
             scePowerGetArmClockFrequency(),
             (unsigned long long)df, (double)df / dt,
             (unsigned long long)dc, (double)dc / dt / 1e6,
             100.0 * ((double)dc / dt) / 33868800.0,
             (double)(dirty - prev_dirty) / dt / 1e6,
-            vblank_us / 1000.0 / (double)df);
-#ifdef __vita__
-        /* Helper-call rates. blocks/s counts every basic block the generated
-         * code enters: the increment lives in the cpu_state.h psx_slice_block
-         * wrapper (the one call each block leader makes), not in
-         * psx_slice_block_impl, which the parked default never reaches.
-         * Host cycles per guest instruction is then (arm MHz) /
-         * (blocks/s * mean instructions per block). */
-        std::fprintf(stderr,
-            "[xg-phase] calls blocks=+%llu/s svc=+%llu/s irq=+%llu/s "
-            "icache=+%llu/s\n",
-            (unsigned long long)((double)(g_xg_vita_blocks_run - prev_blocks) / dt),
-            (unsigned long long)((double)(g_xg_vita_svc_calls - prev_svc) / dt),
-            (unsigned long long)((double)(g_xg_vita_irq_checks - prev_irq) / dt),
-            (unsigned long long)((double)(g_xg_vita_icache_fetches - prev_ifetch) / dt));
+            vblank_us / 1000.0 / (double)df,
+            (unsigned long long)blocks_s, (unsigned long long)svc_s,
+            (unsigned long long)irq_s, (unsigned long long)icache_s);
         prev_blocks = g_xg_vita_blocks_run;
         prev_svc = g_xg_vita_svc_calls;
         prev_irq = g_xg_vita_irq_checks;
         prev_ifetch = g_xg_vita_icache_fetches;
-#endif
         std::fflush(stderr);
     }
     prev_us = now_us;
