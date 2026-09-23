@@ -9268,16 +9268,20 @@ static void sdl_vblank_frontend_epilogue(void) {
 #ifdef __vita__
     const uint64_t xg_vblank_t0 = xg_vita_now_us();
     const unsigned long long xg_attr_t0 = xg_attr_now();
-    /* This callback fires once per simulated vblank, so the tick delta from
-     * the previous entry is the frame period (the attribution denominator). */
-    if (g_xg_attr_last_vblank_ticks != 0)
-        g_xg_attr_frame_ticks += xg_attr_t0 - g_xg_attr_last_vblank_ticks;
-    g_xg_attr_last_vblank_ticks = xg_attr_t0;
 #endif
     NetplayVblankEpilogue ep = sdl_vblank_present_body();
 #ifdef __vita__
     g_xg_vita_vblank_us += xg_vita_now_us() - xg_vblank_t0;
-    g_xg_attr_present_ticks += xg_attr_now() - xg_attr_t0;
+    const unsigned long long xg_attr_t1 = xg_attr_now();
+    g_xg_attr_present_ticks += xg_attr_t1 - xg_attr_t0;
+    /* Frame boundary is the END of this vblank body to the end of the
+     * previous one, so `frame` covers exactly present + guest work for the
+     * same set of frames the present accumulator covers. Sampling at the
+     * start instead leaves the newest present body without its frame delta,
+     * which reads as a negative `guest` whenever one present is long. */
+    if (g_xg_attr_last_vblank_ticks != 0)
+        g_xg_attr_frame_ticks += xg_attr_t1 - g_xg_attr_last_vblank_ticks;
+    g_xg_attr_last_vblank_ticks = xg_attr_t1;
     xg_vita_note_game_start(s_frame_count);
 #endif
     {
