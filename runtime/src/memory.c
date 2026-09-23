@@ -2221,6 +2221,17 @@ static inline uint32_t psx_mmio_read_wait(uint32_t phys, uint32_t size) {
     return 0u;       /* unknown / open-bus region */
 }
 
+#ifdef __vita__
+/* Vita perf probe: read-only view of the PSX_MMIO_WAIT bisect gate for the
+ * [xg-phase] gates line. Mirrors the static resolve inside psx_mmio_read_wait
+ * (same env, same rule) without touching the hot path's text; Vita-only, so
+ * desktop output is unchanged. */
+int psx_mmio_wait_gate(void) {
+    const char* e = getenv("PSX_MMIO_WAIT");
+    return (e && e[0] == '0') ? 0 : 1;
+}
+#endif
+
 /* Beetle ReadMemory data-access timing (cpu.cpp:369-448), after §1/deps/DO_LDS.
  * compl_cost = 2 (CPU load) / 1 (LWC2); arm_rt = GPR to arm as pending load, or
  * 0x20 = none (LWC2, dest is a GTE reg). size = access width in bytes (1/2/4). */

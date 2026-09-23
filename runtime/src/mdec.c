@@ -3,6 +3,7 @@
 #include "psx_align.h"
 #include "pst_wire.h"
 #include "psx_cycles.h"
+#include "psx_vita_attr.h"
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -795,6 +796,20 @@ static void execute_decode(void) {
     trace_event(MDEC_EVT_DECODE_DONE, mdec.output_size);
 }
 
+/* Vita perf probe: bracket every MDEC decode command (the RLE+IDCT+colour
+ * conversion body, not per macroblock) into the [xg-attr] mdec bucket.
+ * Desktop expands to the bare call, so the preprocessed text is unchanged. */
+#ifdef __vita__
+static void execute_decode_timed(void) {
+    const unsigned long long t0 = xg_attr_now();
+    execute_decode();
+    g_xg_attr_mdec_ticks += xg_attr_now() - t0;
+    ++g_xg_attr_mdec_decodes;
+}
+#else
+#define execute_decode_timed() execute_decode()
+#endif
+
 static void execute_command(void) {
     uint32_t op = mdec.command >> 29;
     if (op == MDEC_CMD_SET_QUANT) {
@@ -817,7 +832,7 @@ static void execute_command(void) {
             mdec.scale[t] = (int16_t)((int16_t)mdec.input[i] >> 3);
         }
     } else if (op == MDEC_CMD_DECODE) {
-        execute_decode();
+        execute_decode_timed();
     }
 
     finish_command();

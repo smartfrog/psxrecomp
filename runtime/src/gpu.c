@@ -34,6 +34,7 @@
 #include "color_lut.h"
 #include "mod_runtime.h"
 #include "mod_plugins.h"
+#include "psx_vita_attr.h"
 #include "ws_scene_hold.h"
 #include "sio.h"
 #include "ws_cull_detect.h"
@@ -6769,6 +6770,20 @@ static void gp0_execute_command(void) {
     }
 }
 
+/* Vita perf probe: bracket every completed GP0 command (one call of the
+ * gp0_exec_* dispatch, never per pixel) into the [xg-attr] raster bucket.
+ * Desktop expands to the bare call, so the preprocessed text is unchanged. */
+#ifdef __vita__
+static void gp0_execute_command_timed(void) {
+    const unsigned long long t0 = xg_attr_now();
+    gp0_execute_command();
+    g_xg_attr_raster_ticks += xg_attr_now() - t0;
+    ++g_xg_attr_raster_cmds;
+}
+#else
+#define gp0_execute_command_timed() gp0_execute_command()
+#endif
+
 /* ---- GP0 write (0x1F801810 write) — command state machine ---- */
 
 uint64_t gpu_get_gp0_count(void) { return gp0_write_count; }
@@ -9747,7 +9762,7 @@ static void gpu_write_gp0_body(uint32_t val) {
         oracle_source_word();
         gp0_cmd_buf[gp0_words_collected++] = val;
         if (gp0_words_collected >= gp0_words_needed) {
-            gp0_execute_command();
+            gp0_execute_command_timed();
             if (gp0_state == GP0_COLLECTING)
                 gp0_state = GP0_IDLE;
         }
@@ -9804,7 +9819,7 @@ static void gpu_write_gp0_body(uint32_t val) {
     if (word_count == 1) {
         gp0_words_collected = 1;
         gp0_words_needed = 1;
-        gp0_execute_command();
+        gp0_execute_command_timed();
     } else {
         gp0_state = GP0_COLLECTING;
         gp0_words_collected = 1;

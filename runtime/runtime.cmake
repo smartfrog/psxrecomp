@@ -2035,13 +2035,25 @@ function(psxrecomp_add_runtime_target target)
     endif()
     endif()
 
+    # Vita perf probe, measurement only: compile the per-instruction cycle
+    # model out of the whole runtime (PSX_ENABLE_BLOCK_CYCLES stays undefined,
+    # i.e. the legacy flat wait-state path). This is the "if timing were free"
+    # upper bound for the hardware throughput session and a FIDELITY BREAK
+    # (muldiv/GTE stalls, load-delay interlock and the icache model all
+    # disappear — see vita/PROBE-PROTOCOL.md). Default OFF: desktop and the
+    # normal Vita build keep the PSX_ENABLE_BLOCK_CYCLES=1 they always had.
+    option(PSX_VITA_NOTIMING
+        "Vita perf probe only: build with the per-instruction cycle model compiled out (fidelity-breaking)"
+        OFF)
     if(PSXRT_ORACLE)
         target_compile_definitions(${target} PRIVATE PSX_ORACLE_BUILD=1)
     else()
         target_compile_definitions(${target} PRIVATE
             PSX_NATIVE_BUILD=1
-            PSX_ENABLE_BLOCK_CYCLES=1
         )
+        if(NOT PSX_VITA_NOTIMING)
+            target_compile_definitions(${target} PRIVATE PSX_ENABLE_BLOCK_CYCLES=1)
+        endif()
     endif()
     if(PSX_SHELLWIN_INTERP)
         target_compile_definitions(${target} PRIVATE PSX_SHELLWIN_INTERP_DEFAULT=1)

@@ -215,6 +215,15 @@ static bool native_source_writer_observer(
 #endif
 #ifdef __vita__
 #include <psp2/power.h>
+#include "psx_vita_attr.h"
+
+/* Gate accessors that have no header declaration (the hot paths read getenv
+ * inline) plus the POSIX setenv used by the env-file loader. */
+extern "C" {
+int psx_icache_enabled(void);
+int psx_mmio_wait_gate(void);
+int setenv(const char* name, const char* value, int overwrite);
+}
 
 /* Vita filesystem layout. app0: is the read-only package the VPK installed;
  * ux0:/data/<title> is the writable user directory (settings, mods, memory
@@ -255,6 +264,112 @@ static void xg_vita_log_clocks(void) {
  * emulation throughput from present cost. */
 static uint64_t g_xg_vita_vblank_us = 0;
 
+/* Step-0 attribution accumulators (see psx_vita_attr.h). Defined here with C
+ * linkage so gpu.c (raster) and mdec.c (decode) can bracket their coarse
+ * boundaries without including SDL. */
+extern "C" {
+unsigned long long g_xg_attr_frame_ticks   = 0;
+unsigned long long g_xg_attr_present_ticks = 0;
+unsigned long long g_xg_attr_raster_ticks  = 0;
+unsigned long long g_xg_attr_mdec_ticks    = 0;
+unsigned long long g_xg_attr_raster_cmds   = 0;
+unsigned long long g_xg_attr_mdec_decodes  = 0;
+unsigned long long xg_attr_now(void) {
+    return (unsigned long long)SDL_GetPerformanceCounter();
+}
+}
+static unsigned long long g_xg_attr_last_vblank_ticks = 0;
+
+/* One-shot game-start marker. The rate/attr checkpoints are log-spaced
+ * (frames 31, 151, 631, ...), so a boot that reaches the game late would
+ * report only pre-game windows — which is exactly how the first hardware A/B
+ * ended up comparing BIOS-era windows. Latch the transition and restart the
+ * marker window so the first game-era line is 30 frames wide. */
+static bool g_xg_vita_rate_reset = false;
+static void xg_vita_note_game_start(uint64_t frame) {
+    static bool logged = false;
+    if (logged || !fntrace_is_game_started()) return;
+    logged = true;
+    char msg[96];
+    std::snprintf(msg, sizeof(msg), "game started frame=%llu",
+                  (unsigned long long)frame);
+    xg_vita_phase(msg);
+    g_xg_vita_rate_reset = true;
+}
+
+/* Vita has no process environment, but the runtime's bisect gates
+ * (PSX_ICACHE, PSX_LOAD_DELAY, PSX_MMIO_WAIT, PSX_IDLE_SKIP,
+ * PSX_PRECISE_SLICE, ...) all resolve lazily from getenv(). This is the
+ * hardware A/B toggle: a minimal KEY = "value" file in the writable user
+ * directory, setenv()'d before the first gate can resolve.
+ *
+ *   KEY = "value"    KEY = 1    KEY = true     # comment
+ *
+ * Missing file → no overrides. Unknown or malformed lines are skipped (a typo
+ * must never abort a boot); only PSX_* keys are applied, so the file cannot
+ * inject arbitrary process state. One [xg-phase] line per applied key. */
+static void xg_vita_load_env_file(void) {
+    static const char kPath[] = "ux0:/data/xenogears-recomp/env.toml";
+    FILE* f = std::fopen(kPath, "r");
+    if (!f) {
+        xg_vita_phase("env file absent");
+        return;
+    }
+    char line[256];
+    int applied = 0;
+    while (std::fgets(line, sizeof(line), f) != nullptr) {
+        char* p = line;
+        while (*p == ' ' || *p == '\t') ++p;
+        if (*p == '\0' || *p == '\n' || *p == '\r' || *p == '#' || *p == ';')
+            continue;
+        char* eq = std::strchr(p, '=');
+        if (!eq) continue;
+        *eq = '\0';
+        char* key = p;
+        char* key_end = key + std::strlen(key);
+        while (key_end > key && (key_end[-1] == ' ' || key_end[-1] == '\t'))
+            *--key_end = '\0';
+        char* val = eq + 1;
+        while (*val == ' ' || *val == '\t') ++val;
+        char* val_end = val + std::strlen(val);
+        while (val_end > val && (val_end[-1] == '\n' || val_end[-1] == '\r' ||
+                                 val_end[-1] == ' ' || val_end[-1] == '\t'))
+            *--val_end = '\0';
+        if (std::strncmp(key, "PSX_", 4) != 0 || key[4] == '\0' || *val == '\0')
+            continue;
+        if (*val == '"') {
+            char* close = std::strrchr(val + 1, '"');
+            if (close == nullptr) continue;
+            *close = '\0';
+            ++val;
+        }
+        if (std::strcmp(val, "true") == 0)
+            val = const_cast<char*>("1");
+        else if (std::strcmp(val, "false") == 0)
+            val = const_cast<char*>("0");
+        if (setenv(key, val, 1) != 0) continue;
+        ++applied;
+        char msg[192];
+        std::snprintf(msg, sizeof(msg), "env override %s=%s", key, val);
+        xg_vita_phase(msg);
+    }
+    std::fclose(f);
+    if (applied == 0) xg_vita_phase("env file present, no PSX_* keys");
+}
+
+/* Resolved gate state — the evidence that env.toml reached the gates. Read
+ * through the same accessors the hot paths use (mmio_wait's Vita-only accessor
+ * mirrors its static resolve); printed once, just before the guest starts. */
+static void xg_vita_log_gates(void) {
+    extern int g_idle_skip_enabled;
+    char line[160];
+    std::snprintf(line, sizeof(line),
+                  "gates icache=%d load_delay=%d mmio_wait=%d idle_skip=%d precise_slice=%d",
+                  psx_icache_enabled(), psx_load_delay_enabled(),
+                  psx_mmio_wait_gate(), g_idle_skip_enabled, g_psx_precise_slice);
+    xg_vita_phase(line);
+}
+
 /* Periodic emulation-rate marker for hardware runs. Answers, for the window
  * since the previous line: guest vblank rate, guest cycles/second (as a
  * fraction of PS1 realtime), the average vblank-body time, and the per-helper
@@ -272,14 +387,41 @@ extern unsigned long long g_xg_vita_blocks_run;
 extern unsigned long long g_xg_vita_svc_calls;
 extern unsigned long long g_xg_vita_irq_checks;
 extern unsigned long long g_xg_vita_icache_fetches;
+extern uint64_t g_dirty_window_dispatches;
 }
 #endif
 static void xg_vita_rate_marker(void) {
     static uint64_t prev_us = 0, prev_frame = 0, prev_cycle = 0, prev_vblank_us = 0;
     static uint64_t prev_dirty = 0;
     static uint64_t prev_blocks = 0, prev_svc = 0, prev_irq = 0, prev_ifetch = 0;
+    static unsigned long long prev_attr_frame = 0, prev_attr_present = 0;
+    static unsigned long long prev_attr_raster = 0, prev_attr_mdec = 0;
+    static unsigned long long prev_attr_raster_cmds = 0, prev_attr_mdec_decodes = 0;
+    static uint64_t prev_gp0 = 0, prev_disp = 0;
     static uint64_t next_frame = 1, step = 30;
     const uint64_t frame = s_frame_count;
+    if (g_xg_vita_rate_reset) {
+        /* Re-base: drop the current window (it straddles game start) and
+         * restart the cadence so the next line is a clean 30-frame window.
+         * Every prev_* used by the deltas must move to "now" or the next
+         * window would divide a full-span delta by 30 frames. */
+        g_xg_vita_rate_reset = false;
+        prev_us = 0;
+        step = 30;
+        next_frame = 1;
+        prev_blocks = g_xg_vita_blocks_run;
+        prev_svc = g_xg_vita_svc_calls;
+        prev_irq = g_xg_vita_irq_checks;
+        prev_ifetch = g_xg_vita_icache_fetches;
+        prev_attr_frame = g_xg_attr_frame_ticks;
+        prev_attr_present = g_xg_attr_present_ticks;
+        prev_attr_raster = g_xg_attr_raster_ticks;
+        prev_attr_mdec = g_xg_attr_mdec_ticks;
+        prev_attr_raster_cmds = g_xg_attr_raster_cmds;
+        prev_attr_mdec_decodes = g_xg_attr_mdec_decodes;
+        prev_gp0 = gpu_get_gp0_count();
+        prev_disp = g_dirty_window_dispatches;
+    }
     if (frame < next_frame) return;
     const uint64_t now_us = xg_vita_now_us();
     const uint64_t cycle = (uint64_t)psx_get_cycle_count();
@@ -315,6 +457,53 @@ static void xg_vita_rate_marker(void) {
             vblank_us / 1000.0 / (double)df,
             (unsigned long long)blocks_s, (unsigned long long)svc_s,
             (unsigned long long)irq_s, (unsigned long long)icache_s);
+        /* Step-0 attribution, same window as the rate line: ms/frame per
+         * bucket. guest = frame - present; raster/mdec are nested in guest;
+         * other = guest - raster - mdec is pure CPU emulation + timing +
+         * device service. ddisp/dinsn are the raw interpreter deltas for the
+         * window (dispatches into the dirty-RAM interpreter, instructions it
+         * retired), so the interpreter share is readable without inference. */
+        {
+            static double s_attr_tick_ms = 0.0;
+            if (s_attr_tick_ms == 0.0) {
+                const Uint64 f = SDL_GetPerformanceFrequency();
+                s_attr_tick_ms = f ? (1000.0 / (double)f) : 0.001;
+            }
+            const double per_frame = 1.0 / (double)df;
+            const double frame_ms =
+                (double)(g_xg_attr_frame_ticks - prev_attr_frame) * s_attr_tick_ms * per_frame;
+            const double present_ms =
+                (double)(g_xg_attr_present_ticks - prev_attr_present) * s_attr_tick_ms * per_frame;
+            const double raster_ms =
+                (double)(g_xg_attr_raster_ticks - prev_attr_raster) * s_attr_tick_ms * per_frame;
+            const double mdec_ms =
+                (double)(g_xg_attr_mdec_ticks - prev_attr_mdec) * s_attr_tick_ms * per_frame;
+            const double guest_ms = frame_ms - present_ms;
+            const double other_ms = guest_ms - raster_ms - mdec_ms;
+            const uint64_t gp0 = gpu_get_gp0_count();
+            const uint64_t disp = g_dirty_window_dispatches;
+            std::fprintf(stderr,
+                "[xg-attr] frame=%.1fms guest=%.1fms raster=%.1fms mdec=%.1fms "
+                "present=%.1fms other=%.1fms gp0w=+%llu/s gp0c=+%llu/s mdecc=+%llu/s "
+                "ddisp=+%llu dinsn=+%llu game=%d\n",
+                frame_ms, guest_ms, raster_ms, mdec_ms, present_ms, other_ms,
+                (unsigned long long)((gp0 - prev_gp0) * 1000000ull / dus),
+                (unsigned long long)((g_xg_attr_raster_cmds - prev_attr_raster_cmds) *
+                                     1000000ull / dus),
+                (unsigned long long)((g_xg_attr_mdec_decodes - prev_attr_mdec_decodes) *
+                                     1000000ull / dus),
+                (unsigned long long)(disp - prev_disp),
+                (unsigned long long)(dirty - prev_dirty),
+                fntrace_is_game_started());
+            prev_attr_frame = g_xg_attr_frame_ticks;
+            prev_attr_present = g_xg_attr_present_ticks;
+            prev_attr_raster = g_xg_attr_raster_ticks;
+            prev_attr_mdec = g_xg_attr_mdec_ticks;
+            prev_attr_raster_cmds = g_xg_attr_raster_cmds;
+            prev_attr_mdec_decodes = g_xg_attr_mdec_decodes;
+            prev_gp0 = gp0;
+            prev_disp = disp;
+        }
         prev_blocks = g_xg_vita_blocks_run;
         prev_svc = g_xg_vita_svc_calls;
         prev_irq = g_xg_vita_irq_checks;
@@ -9078,10 +9267,18 @@ static NetplayVblankEpilogue sdl_vblank_present_body(void) {
 static void sdl_vblank_frontend_epilogue(void) {
 #ifdef __vita__
     const uint64_t xg_vblank_t0 = xg_vita_now_us();
+    const unsigned long long xg_attr_t0 = xg_attr_now();
+    /* This callback fires once per simulated vblank, so the tick delta from
+     * the previous entry is the frame period (the attribution denominator). */
+    if (g_xg_attr_last_vblank_ticks != 0)
+        g_xg_attr_frame_ticks += xg_attr_t0 - g_xg_attr_last_vblank_ticks;
+    g_xg_attr_last_vblank_ticks = xg_attr_t0;
 #endif
     NetplayVblankEpilogue ep = sdl_vblank_present_body();
 #ifdef __vita__
     g_xg_vita_vblank_us += xg_vita_now_us() - xg_vblank_t0;
+    g_xg_attr_present_ticks += xg_attr_now() - xg_attr_t0;
+    xg_vita_note_game_start(s_frame_count);
 #endif
     {
         static bool s_first_present_logged = false;
@@ -13882,6 +14079,7 @@ int main(int argc, char** argv) {
                 std::setvbuf(stdout, nullptr, _IOLBF, BUFSIZ);
         }
         xg_vita_log_clocks();
+        xg_vita_load_env_file();
     }
 #endif
 
@@ -17900,6 +18098,9 @@ session_reboot:
 
     /* Execute. */
     xg_vita_phase("module init end");
+#ifdef __vita__
+    xg_vita_log_gates();
+#endif
     std::fprintf(stdout, "psxrecomp runtime: executing from PC=0x%08X\n", cpu.pc);
 #ifdef __vita__
     {
