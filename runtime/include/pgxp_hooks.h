@@ -73,6 +73,21 @@ typedef struct PGXPHooks {
     void (*cop2)  (struct CPUState *cpu, uint32_t instr, uint32_t value, uint32_t addr);
 } PGXPHooks;
 
+/* PSX_NO_NATIVE_PROVENANCE: both provenance channels are enabled exclusively
+ * by the native renderer (gte_native_provenance_set_enabled /
+ * ram_provenance_set_cpu_tracking are driven by g_native_render_selected in
+ * main.cpp), so a build that cannot select it — the Vita target, where
+ * XG_RENDER_NATIVE is OFF — can drop them entirely. The hooks expand in the
+ * generated code once per ALU/load/store, so compiling them out removes a
+ * load+branch per instruction and ~a third of the generated text. The
+ * runtime-side entry points stay defined; only the emitted call sites go. */
+#if defined(PSX_NO_NATIVE_PROVENANCE)
+#define GTE_NATIVE_PROVENANCE_LOAD(instr, addr, val)  ((void)0)
+#define GTE_NATIVE_PROVENANCE_STORE(instr, addr, val) ((void)0)
+#define GTE_NATIVE_PROVENANCE_ALU(instr, res, s1, s2) ((void)0)
+#define GTE_NATIVE_PROVENANCE_COP2(instr, val, addr)  ((void)0)
+#define CPU_RAM_PROVENANCE_STORE(instr, addr, val)    ((void)0)
+#else
 #define GTE_NATIVE_PROVENANCE_LOAD(instr, addr, val) do { \
     if (g_gte_native_provenance_active) \
         gte_native_provenance_cpu_load(cpu, (instr), (addr), (val)); \
@@ -91,6 +106,7 @@ typedef struct PGXPHooks {
 } while (0)
 #define CPU_RAM_PROVENANCE_STORE(instr, addr, val) \
     ram_provenance_note_cpu_store((instr), (addr), (val))
+#endif
 
 #if defined(PSX_PGXP) && PSX_PGXP
 #define PGXP_LOAD(instr, addr, val) do { \

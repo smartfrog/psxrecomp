@@ -1,6 +1,7 @@
 /* psx_cycles.c — PSX guest CPU cycle clock. */
 
 #include "psx_cycles.h"
+#include "psx_vita_perf.h"
 #include "cpu_state.h"
 #include <stdlib.h>
 #include <string.h>
@@ -180,7 +181,19 @@ static void psx_devices_recompute_deadline(void) {
     psx_next_service_cycle = psx_cycle_count + (uint64_t)next;
 }
 
+#ifdef __vita__
+/* Hardware-loop throughput counters (psx_vita_perf.h). Counted here so the
+ * [xg-phase] rate line can attribute host cycles per guest instruction. */
+unsigned long long g_xg_vita_blocks_run      = 0;
+unsigned long long g_xg_vita_svc_calls       = 0;
+unsigned long long g_xg_vita_irq_checks      = 0;
+unsigned long long g_xg_vita_icache_fetches  = 0;
+#endif
+
 void psx_devices_service_to_now(void) {
+#ifdef __vita__
+    ++g_xg_vita_svc_calls;
+#endif
     if (s_in_device_service) return;                 /* device code charged cycles: absorb */
     if (g_plp_cycle_diag) g_plp_svc_calls++;
     g_psx_cycle_fast_limit = 0;

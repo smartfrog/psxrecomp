@@ -152,8 +152,22 @@ static inline void psx_cyc_charge(uint32_t cycles) {
 #endif
 }
 
+/* PSX_VITA_HOT_PATH: the Vita build keeps the generated TUs at -Os, which
+ * leaves the timing helpers below as out-of-line calls (one `bl` per guest
+ * instruction into psx_cyc_step, which then calls base/deps/lds again). Forcing
+ * the leaves inline makes the *single shared copy* of psx_cyc_step and of the
+ * load/store helpers self-contained: the call sites stay one call, but the
+ * three nested calls + prologues per guest instruction disappear. The bodies
+ * are inlined into a handful of shared callees, not at every call site, so the
+ * text grows by a few hundred bytes per TU instead of megabytes. */
+#if defined(PSX_VITA_HOT_PATH) && (defined(__GNUC__) || defined(__clang__))
+#define PSX_CYC_HOT __attribute__((always_inline))
+#else
+#define PSX_CYC_HOT
+#endif
+
 /* §1 base (Beetle cpu.cpp:795-798). */
-static inline void psx_cyc_base(CPUState* cpu) {
+static inline PSX_CYC_HOT void psx_cyc_base(CPUState* cpu) {
     uint8_t w = cpu->read_absorb_which;
     if (cpu->read_absorb[w]) cpu->read_absorb[w]--;
     else                     psx_cyc_charge(1u);
@@ -162,7 +176,7 @@ static inline void psx_cyc_base(CPUState* cpu) {
 /* GPR_DEPRES (Beetle cpu.cpp:702-705): zero ReadAbsorb[n] for every source/dest
  * GPR of this instruction, preserving ReadAbsorb[0] (skipping bit 0 == Beetle's
  * save/restore of ReadAbsorb[0]). */
-static inline void psx_cyc_deps(CPUState* cpu, uint32_t reg_mask) {
+static inline PSX_CYC_HOT void psx_cyc_deps(CPUState* cpu, uint32_t reg_mask) {
     reg_mask &= 0xFFFFFFFEu;   /* never touch ReadAbsorb[0] */
     if (reg_mask && (reg_mask & (reg_mask - 1u)) == 0u) {
 #if defined(_MSC_VER)
@@ -189,7 +203,7 @@ static inline void psx_cyc_deps(CPUState* cpu, uint32_t reg_mask) {
 
 /* DO_LDS timing-commit (Beetle cpu.cpp:800). LDWhich==0x20 (no pending) writes the
  * dummy slot read_absorb[32] and sets read_fudge=0x20 (=> next load gets +2 fudge). */
-static inline void psx_cyc_lds(CPUState* cpu) {
+static inline PSX_CYC_HOT void psx_cyc_lds(CPUState* cpu) {
     uint8_t lw = cpu->ld_which_t;
     cpu->read_absorb[lw]    = (uint8_t)cpu->ld_absorb;
     cpu->read_fudge         = lw;

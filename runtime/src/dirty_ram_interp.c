@@ -29,6 +29,7 @@
 #include "interrupts.h"
 #include "psx_cycles.h"
 #include "psx_icache.h"
+#include "psx_vita_perf.h"
 #include "psx_instr_cost.h"  /* psx_instr_base_cycles — single-source cycle cost */
 #include "gpu.h"   /* psx_ws_is_backdrop_site / psx_ws_backdrop_x (interp hook) */
 #include "ws_backdrop_detect.h"  /* shared backdrop-window detector (auto_backdrop) */
@@ -2942,6 +2943,9 @@ void psx_precise_slice_init_from_env(void) {
  * `return` so its compiled body does not re-execute the same instructions).
  * Returns 0 if the whole block is provably safe to run as fast compiled C. */
 int psx_slice_block_impl(CPUState *cpu, uint32_t block_addr, uint32_t bcyc, int side_effects) {
+#ifdef __vita__
+    ++g_xg_vita_blocks_run;
+#endif
     /* PARKED (PRECISE_IRQ_SLICE.md): precise take-point slicing is a later
      * correctness upgrade, NOT the current FMV blocker (that is the -8 cycle
      * drift / faithful per-instruction cycle model — see CLAUDE.md Rule -1). */

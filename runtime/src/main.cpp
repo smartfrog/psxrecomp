@@ -261,9 +261,20 @@ static uint64_t g_xg_vita_vblank_us = 0;
  * log-spaced so a slow boot still yields early data without flooding the log. */
 extern "C" uint64_t s_frame_count;
 extern "C" uint64_t g_dirty_ram_insns_run;
+#ifdef __vita__
+extern "C" {
+extern unsigned long long g_xg_vita_blocks_run;
+extern unsigned long long g_xg_vita_svc_calls;
+extern unsigned long long g_xg_vita_irq_checks;
+extern unsigned long long g_xg_vita_icache_fetches;
+}
+#endif
 static void xg_vita_rate_marker(void) {
     static uint64_t prev_us = 0, prev_frame = 0, prev_cycle = 0, prev_vblank_us = 0;
     static uint64_t prev_dirty = 0;
+#ifdef __vita__
+    static uint64_t prev_blocks = 0, prev_svc = 0, prev_irq = 0, prev_ifetch = 0;
+#endif
     static uint64_t next_frame = 30, step = 120;
     const uint64_t frame = s_frame_count;
     if (frame < next_frame) return;
@@ -284,6 +295,22 @@ static void xg_vita_rate_marker(void) {
             100.0 * ((double)dc / dt) / 33868800.0,
             (double)(dirty - prev_dirty) / dt / 1e6,
             vblank_us / 1000.0 / (double)df);
+#ifdef __vita__
+        /* Helper-call rates: host cycles per guest instruction is (arm MHz) /
+         * (blocks/s * mean instructions per block); the block count comes from
+         * the one call the generated code makes per basic block. */
+        std::fprintf(stderr,
+            "[xg-phase] calls blocks=+%llu/s svc=+%llu/s irq=+%llu/s "
+            "icache=+%llu/s\n",
+            (unsigned long long)((double)(g_xg_vita_blocks_run - prev_blocks) / dt),
+            (unsigned long long)((double)(g_xg_vita_svc_calls - prev_svc) / dt),
+            (unsigned long long)((double)(g_xg_vita_irq_checks - prev_irq) / dt),
+            (unsigned long long)((double)(g_xg_vita_icache_fetches - prev_ifetch) / dt));
+        prev_blocks = g_xg_vita_blocks_run;
+        prev_svc = g_xg_vita_svc_calls;
+        prev_irq = g_xg_vita_irq_checks;
+        prev_ifetch = g_xg_vita_icache_fetches;
+#endif
         std::fflush(stderr);
     }
     prev_us = now_us;

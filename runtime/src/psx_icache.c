@@ -6,6 +6,7 @@
  * HIT path is inlined in psx_icache.h; this file owns reset + MISS refill.
  */
 #include "psx_icache.h"
+#include "psx_vita_perf.h"
 #include "cpu_state.h"
 #include "psx_cycles.h"
 #include <stdint.h>
@@ -108,6 +109,9 @@ void psx_icache_fetch_miss(CPUState* cpu, uint32_t addr) {
 }
 
 void psx_icache_fetch(CPUState* cpu, uint32_t addr) {
+#ifdef __vita__
+    ++g_xg_vita_icache_fetches;
+#endif
     psx_icache_fetch_miss(cpu, addr);
 }
 

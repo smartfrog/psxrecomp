@@ -26,6 +26,7 @@
  */
 
 #include "interrupts.h"
+#include "psx_vita_perf.h"
 #include "sio.h"
 #include "timers.h"
 #include "gpu.h"
@@ -2272,6 +2273,9 @@ irq_deliver_eval:
  * here gives the mmx6 baseline interrupt behavior — sufficient to build+run the
  * current generated code on the good baseline for instrumented comparison. */
 int psx_check_interrupts_at(CPUState* cpu, uint32_t resume_pc) {
+#ifdef __vita__
+    ++g_xg_vita_irq_checks;
+#endif
     uint32_t prev = s_compiled_interrupt_resume_pc;
     uint64_t deliveries_before = g_irq_deliver_count;
     s_compiled_interrupt_resume_pc = resume_pc;
