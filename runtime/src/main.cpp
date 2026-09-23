@@ -296,9 +296,12 @@ static void xg_vita_rate_marker(void) {
             (double)(dirty - prev_dirty) / dt / 1e6,
             vblank_us / 1000.0 / (double)df);
 #ifdef __vita__
-        /* Helper-call rates: host cycles per guest instruction is (arm MHz) /
-         * (blocks/s * mean instructions per block); the block count comes from
-         * the one call the generated code makes per basic block. */
+        /* Helper-call rates. blocks/s counts every basic block the generated
+         * code enters: the increment lives in the cpu_state.h psx_slice_block
+         * wrapper (the one call each block leader makes), not in
+         * psx_slice_block_impl, which the parked default never reaches.
+         * Host cycles per guest instruction is then (arm MHz) /
+         * (blocks/s * mean instructions per block). */
         std::fprintf(stderr,
             "[xg-phase] calls blocks=+%llu/s svc=+%llu/s irq=+%llu/s "
             "icache=+%llu/s\n",

@@ -108,6 +108,9 @@ void psx_icache_fetch_miss(CPUState* cpu, uint32_t addr) {
 #endif
 }
 
+/* Keep the exported symbol intact when the cascade macro-maps the name onto
+   the inlined fast path (no-op on every other configuration). */
+#undef psx_icache_fetch
 void psx_icache_fetch(CPUState* cpu, uint32_t addr) {
 #ifdef __vita__
     ++g_xg_vita_icache_fetches;

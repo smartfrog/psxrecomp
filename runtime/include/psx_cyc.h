@@ -35,6 +35,7 @@
 #include "cpu_state.h"   /* CPUState (guard-safe: cpu_state.h includes us last) */
 #include "memory.h"
 #include "psx_cycles.h"  /* inline psx_advance_cycles */
+#include "psx_tight_inline.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -90,7 +91,13 @@ static inline void psx_cyc_local_cleanup(uint32_t **guard) {
 }
 #endif
 
+#if defined(PSX_TIGHT_INLINE_ACTIVE)
+/* The cascade inlines psx_cyc_step at every call site; leaving the charge
+ * out-of-line bounds the growth (measured: SELF +14.8 MB with it inlined). */
+static __attribute__((noinline, unused)) void psx_cyc_charge(uint32_t cycles) {
+#else
 static inline void psx_cyc_charge(uint32_t cycles) {
+#endif
     if (cycles == 0u) return;
 #if defined(PSX_OVERLAY_DLL_BUILD)
     psx_advance_cycles(cycles);
@@ -159,15 +166,22 @@ static inline void psx_cyc_charge(uint32_t cycles) {
  * load/store helpers self-contained: the call sites stay one call, but the
  * three nested calls + prologues per guest instruction disappear. The bodies
  * are inlined into a handful of shared callees, not at every call site, so the
- * text grows by a few hundred bytes per TU instead of megabytes. */
-#if defined(PSX_VITA_HOT_PATH) && (defined(__GNUC__) || defined(__clang__))
+ * text grows by a few hundred bytes per TU instead of megabytes.
+ *
+ * PSX_VITA_TIGHT_INLINE (default OFF) goes one step further and inlines
+ * psx_cyc_step itself at every call site, which makes the leaves' own attribute
+ * redundant — it is suppressed while the cascade is active so the two levers
+ * stay separately measurable and the cascade reproduces the A/B build it was
+ * measured on. */
+#if defined(PSX_VITA_HOT_PATH) && !defined(PSX_TIGHT_INLINE_ACTIVE) && \
+    (defined(__GNUC__) || defined(__clang__))
 #define PSX_CYC_HOT __attribute__((always_inline))
 #else
 #define PSX_CYC_HOT
 #endif
 
 /* §1 base (Beetle cpu.cpp:795-798). */
-static inline PSX_CYC_HOT void psx_cyc_base(CPUState* cpu) {
+static PSX_TIGHT_INLINE PSX_CYC_HOT inline void psx_cyc_base(CPUState* cpu) {
     uint8_t w = cpu->read_absorb_which;
     if (cpu->read_absorb[w]) cpu->read_absorb[w]--;
     else                     psx_cyc_charge(1u);
@@ -176,7 +190,7 @@ static inline PSX_CYC_HOT void psx_cyc_base(CPUState* cpu) {
 /* GPR_DEPRES (Beetle cpu.cpp:702-705): zero ReadAbsorb[n] for every source/dest
  * GPR of this instruction, preserving ReadAbsorb[0] (skipping bit 0 == Beetle's
  * save/restore of ReadAbsorb[0]). */
-static inline PSX_CYC_HOT void psx_cyc_deps(CPUState* cpu, uint32_t reg_mask) {
+static PSX_TIGHT_INLINE PSX_CYC_HOT inline void psx_cyc_deps(CPUState* cpu, uint32_t reg_mask) {
     reg_mask &= 0xFFFFFFFEu;   /* never touch ReadAbsorb[0] */
     if (reg_mask && (reg_mask & (reg_mask - 1u)) == 0u) {
 #if defined(_MSC_VER)
@@ -215,7 +229,7 @@ static inline PSX_CYC_HOT void psx_cyc_lds(CPUState* cpu) {
  * branch, jump, store, COP control, LWC2/SWC2 pre-step, mult/div, mfhi/mflo, ...).
  * reg_mask from psx_cyc_dep_res_mask(). MUST be emitted BEFORE the instruction
  * body so §1 precedes any muldiv/GTE deadline stall in the body (Beetle order). */
-static inline void psx_cyc_step(CPUState* cpu, uint32_t reg_mask) {
+static PSX_TIGHT_INLINE inline void psx_cyc_step(CPUState* cpu, uint32_t reg_mask) {
     psx_cyc_base(cpu);
     psx_cyc_deps(cpu, reg_mask);
     psx_cyc_lds(cpu);

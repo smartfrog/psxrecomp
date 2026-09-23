@@ -166,6 +166,9 @@ extern void psx_native_bad_entry(CPUState* cpu, uint32_t owner, uint32_t pc);
 extern void psx_dispatch(CPUState* cpu, uint32_t target_addr);
 extern void psx_dispatch_call(CPUState* cpu, uint32_t target_addr, uint32_t return_addr);
 
+#include "psx_tight_inline.h"
+#include "psx_vita_perf.h"
+
 /* Cycle-budgeted precise event slicing — defined in runtime/src/dirty_ram_interp.c.
  * Emitted at each compiled block leader: if it returns nonzero the block ran
  * through the per-instruction interpreter (interrupt taken at the exact
@@ -182,7 +185,15 @@ void psx_precise_slice_init_from_env(void);
 #ifdef PSX_OVERLAY_DLL_BUILD
 int psx_slice_block(CPUState* cpu, uint32_t block_addr, uint32_t bcyc, int side_effects);
 #else
-static inline int psx_slice_block(CPUState* cpu, uint32_t block_addr, uint32_t bcyc, int side_effects) {
+static PSX_TIGHT_INLINE inline int psx_slice_block(CPUState* cpu, uint32_t block_addr, uint32_t bcyc, int side_effects) {
+#ifdef __vita__
+    /* Block throughput is counted HERE, in the wrapper every compiled block
+     * leader calls, and not in psx_slice_block_impl: the wrapper returns
+     * before the impl whenever precise slicing is parked (the shipped
+     * default, g_psx_precise_slice == 0), so an impl-side counter stays at
+     * zero for a whole run. */
+    ++g_xg_vita_blocks_run;
+#endif
     if (!g_psx_precise_slice) return 0;
     return psx_slice_block_impl(cpu, block_addr, bcyc, side_effects);
 }

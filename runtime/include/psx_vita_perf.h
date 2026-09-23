@@ -7,16 +7,28 @@
  * guest instruction, well under a percent) and is reported by main.cpp's
  * [xg-phase] rate line.
  *
- * Every use site is wrapped in `#ifdef __vita__`, so non-Vita builds compile
- * the counters out completely — no declarations, no definitions, no statements. */
+ * The whole body is inside `#ifdef __vita__`, so a non-Vita build expands this
+ * header to nothing at all — no declarations, no definitions, not even the
+ * extern "C" braces, which keeps the preprocessed output of C++ TUs that
+ * include it byte-identical to the unguarded tree. */
 #ifndef PSXRECOMP_PSX_VITA_PERF_H
 #define PSXRECOMP_PSX_VITA_PERF_H
 
 #ifdef __vita__
-extern unsigned long long g_xg_vita_blocks_run;      /* generated blocks entered */
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+extern unsigned long long g_xg_vita_blocks_run;      /* AOT blocks entered (cpu_state.h wrapper) */
 extern unsigned long long g_xg_vita_svc_calls;       /* psx_devices_service_to_now calls */
 extern unsigned long long g_xg_vita_irq_checks;      /* psx_check_interrupts_at calls */
 extern unsigned long long g_xg_vita_icache_fetches;  /* psx_icache_fetch calls */
+
+#ifdef __cplusplus
+}
 #endif
+
+#endif /* __vita__ */
 
 #endif /* PSXRECOMP_PSX_VITA_PERF_H */
