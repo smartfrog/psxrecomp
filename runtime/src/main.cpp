@@ -388,8 +388,136 @@ extern unsigned long long g_xg_vita_svc_calls;
 extern unsigned long long g_xg_vita_irq_checks;
 extern unsigned long long g_xg_vita_icache_fetches;
 extern uint64_t g_dirty_window_dispatches;
+/* Text-image guard state (memory.c) for the [xg-route] line. */
+extern void     dirty_ram_text_exact_mismatch_stats(uint64_t *count,
+                                                    uint32_t out[5]);
+extern uint32_t dirty_ram_text_modified_bitmap_word(uint32_t word_index);
+extern uint32_t dirty_ram_text_diverged_bitmap_word(uint32_t word_index);
 }
 #endif
+
+/* AOT-routing line: one per rate window (vita-aot-routing). Every counter is
+ * a Vita-only increment at its decision point; the deltas since the previous
+ * line name the gate that keeps game-text PCs out of compiled code:
+ *   range  = dirty_ram_text_native_ok_ranges_from reasons
+ *   text   = dirty_ram_dispatch_inner AOT attempts and their outcome
+ *   id/irq/vsync/ovl = downstream sub-gates inside psx_dispatch_game_compiled
+ * Guard state is absolute: arm/crc/range from registration, base@frame from
+ * the game-start baseline clear, refchk = one-shot live-RAM-vs-reference
+ * comparison taken at that same moment. */
+static void xg_vita_route_marker(void) {
+    static uint64_t p_guard = 0, p_base = 0;
+    static uint64_t p_text_ok = 0, p_text_blocked = 0, p_text_aot = 0, p_text_miss = 0;
+    static uint64_t p_range_calls = 0, p_range_pass = 0, p_range_noref = 0;
+    static uint64_t p_range_bounds = 0, p_range_memcmp = 0;
+    static uint64_t p_id_bind = 0, p_id_bind_ok = 0, p_id_gate = 0, p_id_gate_ok = 0;
+    static uint64_t p_irq = 0, p_irq_taken = 0, p_vsync = 0, p_vsync_ok = 0;
+    static uint64_t p_ovl = 0, p_ovl_ok = 0;
+
+    if (g_xg_route_guard_arms != p_guard) {
+        char msg[96];
+        std::snprintf(msg, sizeof(msg), "guard armed crc=%08X range=%05X-%05X",
+                      g_xg_route_guard_crc, g_xg_route_guard_lo,
+                      g_xg_route_guard_hi);
+        xg_vita_phase(msg);
+        p_guard = g_xg_route_guard_arms;
+    }
+    if (g_xg_route_baseline_clears != p_base) {
+        char msg[176];
+        if (g_xg_route_refcheck_bad == 0)
+            std::snprintf(msg, sizeof(msg),
+                "guard baseline frame=%u refcheck=OK (%llu bytes match) "
+                "mod=%u div=%u",
+                g_xg_route_baseline_frame,
+                (unsigned long long)g_xg_route_refcheck_bytes,
+                g_xg_route_baseline_modified, g_xg_route_baseline_diverged);
+        else
+            std::snprintf(msg, sizeof(msg),
+                "guard baseline frame=%u refcheck=FAILED bad=%llu/%llu "
+                "first=@%05X live=%02X ref=%02X mod=%u div=%u",
+                g_xg_route_baseline_frame,
+                (unsigned long long)g_xg_route_refcheck_bad,
+                (unsigned long long)g_xg_route_refcheck_bytes,
+                g_xg_route_refcheck_first ? g_xg_route_refcheck_first - 1u : 0u,
+                g_xg_route_refcheck_live, g_xg_route_refcheck_ref,
+                g_xg_route_baseline_modified, g_xg_route_baseline_diverged);
+        xg_vita_phase(msg);
+        p_base = g_xg_route_baseline_clears;
+    }
+
+    uint32_t mod_pages = 0, div_pages = 0;
+    for (uint32_t i = 0; i < 64u; i++) {
+        mod_pages += (uint32_t)__builtin_popcount(
+            dirty_ram_text_modified_bitmap_word(i));
+        div_pages += (uint32_t)__builtin_popcount(
+            dirty_ram_text_diverged_bitmap_word(i));
+    }
+    uint64_t exact_count = 0;
+    uint32_t exact_last[5] = {0, 0, 0, 0, 0};
+    dirty_ram_text_exact_mismatch_stats(&exact_count, exact_last);
+
+    std::fprintf(stderr,
+        "[xg-route] text ok=+%llu blocked=+%llu aot=+%llu miss=+%llu | "
+        "range call=+%llu pass=+%llu noref=+%llu bounds=+%llu memcmp=+%llu | "
+        "id bind=+%llu/%llu gate=+%llu/%llu | "
+        "irq=+%llu/%llu vsync=+%llu/%llu ovl=+%llu/%llu | "
+        "guard arm=%llu crc=%08X range=%05X-%05X base=%llu@%u mod=%u div=%u | "
+        "refchk bad=%llu/%llu first=@%05X live=%02X ref=%02X | "
+        "mismatch n=%llu @%05X len=%X live=%02X ref=%02X | "
+        "last blocked=@%05X aot=@%05X | bounds_fail lo=%05X len=%X\n",
+        (unsigned long long)(g_xg_route_text_ok - p_text_ok),
+        (unsigned long long)(g_xg_route_text_blocked - p_text_blocked),
+        (unsigned long long)(g_xg_route_text_aot - p_text_aot),
+        (unsigned long long)(g_xg_route_text_miss - p_text_miss),
+        (unsigned long long)(g_xg_route_range_calls - p_range_calls),
+        (unsigned long long)(g_xg_route_range_pass - p_range_pass),
+        (unsigned long long)(g_xg_route_range_noref - p_range_noref),
+        (unsigned long long)(g_xg_route_range_bounds - p_range_bounds),
+        (unsigned long long)(g_xg_route_range_memcmp - p_range_memcmp),
+        (unsigned long long)(g_xg_route_id_bind_calls - p_id_bind),
+        (unsigned long long)(g_xg_route_id_bind_ok - p_id_bind_ok),
+        (unsigned long long)(g_xg_route_id_gate_calls - p_id_gate),
+        (unsigned long long)(g_xg_route_id_gate_ok - p_id_gate_ok),
+        (unsigned long long)(g_xg_route_irq_entry_calls - p_irq),
+        (unsigned long long)(g_xg_route_irq_entry_taken - p_irq_taken),
+        (unsigned long long)(g_xg_route_vsync_try_calls - p_vsync),
+        (unsigned long long)(g_xg_route_vsync_try_handled - p_vsync_ok),
+        (unsigned long long)(g_xg_route_ovl_static_tries - p_ovl),
+        (unsigned long long)(g_xg_route_ovl_static_hits - p_ovl_ok),
+        g_xg_route_guard_arms, g_xg_route_guard_crc,
+        g_xg_route_guard_lo, g_xg_route_guard_hi,
+        g_xg_route_baseline_clears, g_xg_route_baseline_frame,
+        mod_pages, div_pages,
+        (unsigned long long)g_xg_route_refcheck_bad,
+        (unsigned long long)g_xg_route_refcheck_bytes,
+        g_xg_route_refcheck_first ? g_xg_route_refcheck_first - 1u : 0u,
+        g_xg_route_refcheck_live, g_xg_route_refcheck_ref,
+        (unsigned long long)exact_count,
+        exact_last[2], exact_last[1], exact_last[3], exact_last[4],
+        g_xg_route_last_blocked_addr, g_xg_route_last_aot_addr,
+        g_xg_route_bounds_lo, g_xg_route_bounds_len);
+    p_text_ok = g_xg_route_text_ok;
+    p_text_blocked = g_xg_route_text_blocked;
+    p_text_aot = g_xg_route_text_aot;
+    p_text_miss = g_xg_route_text_miss;
+    p_range_calls = g_xg_route_range_calls;
+    p_range_pass = g_xg_route_range_pass;
+    p_range_noref = g_xg_route_range_noref;
+    p_range_bounds = g_xg_route_range_bounds;
+    p_range_memcmp = g_xg_route_range_memcmp;
+    p_id_bind = g_xg_route_id_bind_calls;
+    p_id_bind_ok = g_xg_route_id_bind_ok;
+    p_id_gate = g_xg_route_id_gate_calls;
+    p_id_gate_ok = g_xg_route_id_gate_ok;
+    p_irq = g_xg_route_irq_entry_calls;
+    p_irq_taken = g_xg_route_irq_entry_taken;
+    p_vsync = g_xg_route_vsync_try_calls;
+    p_vsync_ok = g_xg_route_vsync_try_handled;
+    p_ovl = g_xg_route_ovl_static_tries;
+    p_ovl_ok = g_xg_route_ovl_static_hits;
+    std::fflush(stderr);
+}
+
 static void xg_vita_rate_marker(void) {
     static uint64_t prev_us = 0, prev_frame = 0, prev_cycle = 0, prev_vblank_us = 0;
     static uint64_t prev_dirty = 0;
@@ -504,6 +632,7 @@ static void xg_vita_rate_marker(void) {
             prev_gp0 = gp0;
             prev_disp = disp;
         }
+        xg_vita_route_marker();
         prev_blocks = g_xg_vita_blocks_run;
         prev_svc = g_xg_vita_svc_calls;
         prev_irq = g_xg_vita_irq_checks;

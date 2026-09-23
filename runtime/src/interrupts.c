@@ -2291,8 +2291,21 @@ int psx_interrupts_checked_at_current_cycle(uint32_t resume_pc) {
 }
 
 int psx_check_interrupts_dispatch_entry(CPUState* cpu, uint32_t resume_pc) {
+#ifdef __vita__
+    ++g_xg_route_irq_entry_calls;
+#endif
     if (psx_interrupts_checked_at_current_cycle(resume_pc)) {
         return 0;
     }
+#ifdef __vita__
+    /* Routing instrumentation: reached only from psx_dispatch_game_compiled,
+     * i.e. past the entry lookup, identity gate and range validation. */
+    if (psx_check_interrupts_at(cpu, resume_pc)) {
+        ++g_xg_route_irq_entry_taken;
+        return 1;
+    }
+    return 0;
+#else
     return psx_check_interrupts_at(cpu, resume_pc);
+#endif
 }

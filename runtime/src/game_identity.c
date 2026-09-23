@@ -1,6 +1,9 @@
 #include "game_identity.h"
 
 #include <string.h>
+#ifdef __vita__
+#include "psx_vita_perf.h"
+#endif
 
 static PsxGameIdentity s_runtime_identity;
 static int s_runtime_initialized;
@@ -47,17 +50,33 @@ const PsxGameIdentity *psx_game_identity_runtime(void) {
 
 int psx_game_identity_bind_static(const PsxGameIdentity *identity) {
     const PsxGameIdentity *runtime = psx_game_identity_runtime();
+#ifdef __vita__
+    ++g_xg_route_id_bind_calls;
+#endif
     if (!runtime || !identity || !psx_game_identity_equal(runtime, identity)) return 0;
     if (!s_static_bound) {
         s_static_identity = *identity;
         s_static_bound = 1;
     }
+#ifdef __vita__
+    ++g_xg_route_id_bind_ok;
+#endif
     return psx_game_identity_equal(&s_static_identity, identity);
 }
 
 int psx_game_identity_gate(const PsxGameIdentity *identity) {
+#ifdef __vita__
+    ++g_xg_route_id_gate_calls;
+    {
+        int ok = identity && s_static_bound &&
+                 psx_game_identity_equal(&s_static_identity, identity);
+        if (ok) ++g_xg_route_id_gate_ok;
+        return ok;
+    }
+#else
     return identity && s_static_bound &&
            psx_game_identity_equal(&s_static_identity, identity);
+#endif
 }
 
 static void encode_sha256_hex(

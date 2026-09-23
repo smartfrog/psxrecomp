@@ -16,6 +16,9 @@
 #include "xg_render_auth_runtime_hooks.h"
 #include "xg_render_auth_runtime_invalidation.h"
 #include "memory.h"
+#ifdef __vita__
+#include "psx_vita_perf.h"
+#endif
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -4213,7 +4216,13 @@ static int overlay_static_dispatch(CPUState *cpu, uint32_t addr,
                                    int *known) {
     extern int psx_overlay_dispatch(CPUState *cpu, uint32_t addr);
     extern int psx_overlay_static_image_known(uint32_t addr);
+#ifdef __vita__
+    ++g_xg_route_ovl_static_tries;
+#endif
     if (psx_overlay_dispatch(cpu, addr)) {
+#ifdef __vita__
+        ++g_xg_route_ovl_static_hits;
+#endif
         if (known) *known = 1;
         return 1;
     }

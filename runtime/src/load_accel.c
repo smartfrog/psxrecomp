@@ -67,10 +67,25 @@ void psx_vsync_query_hle_configure(uint32_t func, uint32_t counter_addr,
 }
 
 int psx_vsync_query_hle_try(CPUState* cpu, uint32_t dispatch_addr) {
+#ifdef __vita__
+    /* Routing instrumentation: reached only from psx_dispatch_game_compiled
+     * after identity + range validation passed. */
+    ++g_xg_route_vsync_try_calls;
+#endif
     if (!s_cfg_func || dispatch_addr != s_cfg_func) return 0;
+#ifdef __vita__
+    if (psx_vsync_query_hle_enter(cpu, s_cfg_func, s_cfg_counter,
+                                  s_cfg_gpustat_ptr, s_cfg_timer1_ptr,
+                                  s_cfg_timer1_cache)) {
+        ++g_xg_route_vsync_try_handled;
+        return 1;
+    }
+    return 0;
+#else
     return psx_vsync_query_hle_enter(cpu, s_cfg_func, s_cfg_counter,
                                      s_cfg_gpustat_ptr, s_cfg_timer1_ptr,
                                      s_cfg_timer1_cache);
+#endif
 }
 
 void psx_vsync_query_hle_set_enabled(int on) { s_enabled = on ? 1 : 0; }

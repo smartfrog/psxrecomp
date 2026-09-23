@@ -188,6 +188,46 @@ unsigned long long g_xg_vita_blocks_run      = 0;
 unsigned long long g_xg_vita_svc_calls       = 0;
 unsigned long long g_xg_vita_irq_checks      = 0;
 unsigned long long g_xg_vita_icache_fetches  = 0;
+
+/* AOT-routing counters (vita-aot-routing). Definitions live here with the
+ * other Vita perf counters; each is incremented at its decision point in the
+ * owning translation unit and reported by main.cpp's [xg-route] line. */
+unsigned long long g_xg_route_guard_arms      = 0;
+unsigned int       g_xg_route_guard_crc       = 0;
+unsigned int       g_xg_route_guard_lo        = 0;
+unsigned int       g_xg_route_guard_hi        = 0;
+unsigned long long g_xg_route_baseline_clears = 0;
+unsigned int       g_xg_route_baseline_frame  = 0;
+unsigned int       g_xg_route_baseline_modified = 0;
+unsigned int       g_xg_route_baseline_diverged = 0;
+unsigned long long g_xg_route_refcheck_bytes  = 0;
+unsigned long long g_xg_route_refcheck_bad    = 0;
+unsigned int       g_xg_route_refcheck_first  = 0;
+unsigned int       g_xg_route_refcheck_live   = 0;
+unsigned int       g_xg_route_refcheck_ref    = 0;
+unsigned long long g_xg_route_range_calls     = 0;
+unsigned long long g_xg_route_range_pass      = 0;
+unsigned long long g_xg_route_range_noref     = 0;
+unsigned long long g_xg_route_range_bounds    = 0;
+unsigned long long g_xg_route_range_memcmp    = 0;
+unsigned int       g_xg_route_bounds_lo       = 0;
+unsigned int       g_xg_route_bounds_len      = 0;
+unsigned long long g_xg_route_text_ok         = 0;
+unsigned long long g_xg_route_text_blocked    = 0;
+unsigned long long g_xg_route_text_aot        = 0;
+unsigned long long g_xg_route_text_miss       = 0;
+unsigned int       g_xg_route_last_blocked_addr = 0;
+unsigned int       g_xg_route_last_aot_addr   = 0;
+unsigned long long g_xg_route_id_bind_calls   = 0;
+unsigned long long g_xg_route_id_bind_ok      = 0;
+unsigned long long g_xg_route_id_gate_calls   = 0;
+unsigned long long g_xg_route_id_gate_ok      = 0;
+unsigned long long g_xg_route_irq_entry_calls = 0;
+unsigned long long g_xg_route_irq_entry_taken = 0;
+unsigned long long g_xg_route_vsync_try_calls = 0;
+unsigned long long g_xg_route_vsync_try_handled = 0;
+unsigned long long g_xg_route_ovl_static_tries = 0;
+unsigned long long g_xg_route_ovl_static_hits  = 0;
 #endif
 
 void psx_devices_service_to_now(void) {

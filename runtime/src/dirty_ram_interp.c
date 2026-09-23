@@ -3010,12 +3010,22 @@ static int dirty_ram_dispatch_inner(CPUState* cpu, uint32_t addr, uint32_t stop_
      * native-safe. Dirty overlay pages and pages whose text bytes diverged from
      * the original EXE image fall through to interpret the live RAM bytes. */
     if (psx_game_text_native_ok(addr)) {
+#ifdef __vita__
+        /* Routing instrumentation: this branch means the full range gate
+         * passed, so any remaining zero-blocks condition is downstream
+         * (identity/interrupt/vsync) or not on this path at all. */
+        ++g_xg_route_text_ok;
+#endif
         g_mixed_depth++;
         {
             ls_func_enter(addr, cpu);
             int prev_phase = g_exec_phase;
             g_exec_phase = 3;
             int _gc = psx_dispatch_game_compiled(cpu, addr);
+#ifdef __vita__
+            if (_gc) { ++g_xg_route_text_aot; g_xg_route_last_aot_addr = addr; }
+            else     { ++g_xg_route_text_miss; }
+#endif
             g_exec_phase = prev_phase;
             ls_func_exit(addr, cpu, _gc);
             g_mixed_depth--;
@@ -3023,6 +3033,11 @@ static int dirty_ram_dispatch_inner(CPUState* cpu, uint32_t addr, uint32_t stop_
         }
         clean_game_text_miss = psx_game_address_in_text(addr) ? 1 : 0;
     } else if (psx_game_address_in_text(addr)) {
+#ifdef __vita__
+        /* In-text entry whose range gate rejected: interpret the live RAM. */
+        ++g_xg_route_text_blocked;
+        g_xg_route_last_blocked_addr = addr;
+#endif
         /* RAM at a game-text address diverged from the static EXE image
          * (runtime-relocated / overlaid / self-modified code the compiled
          * static function no longer reflects). The live RAM is the truth:

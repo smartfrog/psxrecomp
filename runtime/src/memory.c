@@ -34,6 +34,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef __vita__
+#include "crc32.h"
+#endif
 
 #define SCRATCHPAD_SIZE 1024
 #define BIOS_ROM_SIZE   (512 * 1024)
@@ -495,6 +498,9 @@ int dirty_ram_is_dirty(uint32_t phys);
  * at 0x180000). Baselining from the kernel-window end instead of the real text
  * base wiped that whole region's dirty bits. See dirty_ram_interp.h. */
 extern uint32_t g_overlay_region_floor;
+#ifdef __vita__
+static void route_note_baseline_clear(void);
+#endif
 void dirty_ram_clear_image_baseline(void) {
     uint32_t floor = g_overlay_region_floor;
     if (floor <= DIRTY_RAM_KERNEL_TRACK_BYTES) return;
@@ -506,6 +512,14 @@ void dirty_ram_clear_image_baseline(void) {
     uint32_t last_page  = (floor - 1u) >> DIRTY_RAM_PAGE_SHIFT;
     for (uint32_t page = first_page; page <= last_page; page++)
         dirty_ram_bitmap[page >> 5] &= ~(1u << (page & 31u));
+#ifdef __vita__
+    /* Routing instrumentation (vita-aot-routing): this is the game-start
+     * transition, i.e. the first moment live RAM should equal the registered
+     * reference image. Record the guard state and run the one-shot ref-vs-live
+     * comparison that separates "reference image is wrong" from "the game
+     * really did overwrite its text". */
+    route_note_baseline_clear();
+#endif
 }
 
 /* Text-image divergence guard.
@@ -538,6 +552,50 @@ static uint32_t g_text_exact_last_mismatch = 0;
 static uint32_t g_text_exact_last_live = 0;
 static uint32_t g_text_exact_last_ref = 0;
 
+#ifdef __vita__
+/* Game-start guard state capture (vita-aot-routing). Runs once from
+ * dirty_ram_clear_image_baseline(): records the modified/diverged page counts
+ * and compares the whole registered reference image against live RAM, which is
+ * exactly the comparison dirty_ram_text_native_ok_ranges_from() will make at
+ * every subsequent game-text dispatch. A non-zero `bad` here means the
+ * reference image itself does not match the bytes the BIOS loaded (so every
+ * range check will fail), not that the game diverged later. */
+static void route_note_baseline_clear(void) {
+    extern uint64_t s_frame_count;
+    ++g_xg_route_baseline_clears;
+    g_xg_route_baseline_frame = (uint32_t)s_frame_count;
+    uint32_t mod = 0, div = 0;
+    for (uint32_t i = 0; i < (uint32_t)(sizeof(text_modified_bitmap) /
+                                        sizeof(text_modified_bitmap[0])); i++) {
+        uint32_t m = text_modified_bitmap[i];
+        uint32_t d = text_diverged_bitmap[i];
+        while (m) { mod += m & 1u; m >>= 1; }
+        while (d) { div += d & 1u; d >>= 1; }
+    }
+    g_xg_route_baseline_modified = mod;
+    g_xg_route_baseline_diverged = div;
+    g_xg_route_refcheck_bytes = 0;
+    g_xg_route_refcheck_bad = 0;
+    g_xg_route_refcheck_first = 0;
+    g_xg_route_refcheck_live = 0;
+    g_xg_route_refcheck_ref = 0;
+    if (!text_ref_image) return;
+    uint32_t lo = text_ref_lo, hi = text_ref_hi;
+    if (hi > g_psx_ram_size) hi = g_psx_ram_size;
+    for (uint32_t off = 0; off < hi - lo; off++) {
+        g_xg_route_refcheck_bytes++;
+        if (ram[lo + off] != text_ref_image[off]) {
+            g_xg_route_refcheck_bad++;
+            if (g_xg_route_refcheck_first == 0) {
+                g_xg_route_refcheck_first = off + 1u;
+                g_xg_route_refcheck_live = ram[lo + off];
+                g_xg_route_refcheck_ref = text_ref_image[off];
+            }
+        }
+    }
+}
+#endif
+
 void dirty_ram_register_text_image(uint32_t phys_lo, const uint8_t *bytes,
                                    uint32_t len) {
     if (!bytes || len == 0 || phys_lo >= g_psx_ram_size) return;
@@ -555,6 +613,12 @@ void dirty_ram_register_text_image(uint32_t phys_lo, const uint8_t *bytes,
     g_text_exact_last_mismatch = 0;
     g_text_exact_last_live = 0;
     g_text_exact_last_ref = 0;
+#ifdef __vita__
+    ++g_xg_route_guard_arms;
+    g_xg_route_guard_crc = crc32_compute(bytes, len);
+    g_xg_route_guard_lo = text_ref_lo;
+    g_xg_route_guard_hi = text_ref_hi;
+#endif
 }
 
 int dirty_ram_text_image_registered(void) { return text_ref_image != NULL; }
@@ -621,6 +685,14 @@ int dirty_ram_text_native_ok(uint32_t phys) {
 int dirty_ram_text_native_ok_ranges_from(const uint32_t *lo_len_pairs,
                                          uint32_t count,
                                          uint32_t exec_pc) {
+#ifdef __vita__
+    ++g_xg_route_range_calls;
+    if (!text_ref_image) {
+        /* Guard not armed: every in-text dispatch is rejected here. */
+        ++g_xg_route_range_noref;
+        return 0;
+    }
+#endif
     if (!text_ref_image || !lo_len_pairs || count == 0) return 0;
     (void)exec_pc;
     int any = 0;
@@ -629,6 +701,11 @@ int dirty_ram_text_native_ok_ranges_from(const uint32_t *lo_len_pairs,
         uint32_t len = lo_len_pairs[i * 2u + 1u];
         if (len == 0 || phys < text_ref_lo || phys >= text_ref_hi ||
             len > text_ref_hi - phys) {
+#ifdef __vita__
+            ++g_xg_route_range_bounds;
+            g_xg_route_bounds_lo = phys;
+            g_xg_route_bounds_len = len;
+#endif
             g_text_native_blocked++;
             return 0;
         }
@@ -653,6 +730,9 @@ int dirty_ram_text_native_ok_ranges_from(const uint32_t *lo_len_pairs,
             if (clean) continue;
         }
         if (memcmp(ram + phys, text_ref_image + (phys - text_ref_lo), len) != 0) {
+#ifdef __vita__
+            ++g_xg_route_range_memcmp;
+#endif
             uint32_t off = 0;
             const uint8_t *live = ram + phys;
             const uint8_t *ref = text_ref_image + (phys - text_ref_lo);
@@ -673,6 +753,9 @@ int dirty_ram_text_native_ok_ranges_from(const uint32_t *lo_len_pairs,
         g_text_native_blocked++;
         return 0;
     }
+#ifdef __vita__
+    ++g_xg_route_range_pass;
+#endif
     return 1;
 }
 
